@@ -1,4 +1,3 @@
-// routes/availabilityRoutes.js
 const express = require('express');
 const availabilityRouter = express.Router();
 const { check } = require('express-validator');
@@ -6,9 +5,6 @@ const availabilityController = require('../controllers/availabilityController');
 const { protect, authorize } = require('../middleware/auth');
 
 // Base route: /api/availabilities
-
-// Get all availabilities (staff only)
-// availabilityRouter.get('/', availabilityController.getAllAvailabilities);
 
 // Get a single availability by ID
 availabilityRouter.get('/:id', availabilityController.getAvailabilityById);

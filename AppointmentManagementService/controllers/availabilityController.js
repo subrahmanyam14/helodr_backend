@@ -1,14 +1,9 @@
-// controllers/availabilityController.js
 const mongoose = require('mongoose');
 const Availability = require('../models/Availability');
 const Doctor = require("../models/Doctor");
 const { validationResult } = require('express-validator');
 
-/**
- * Get doctor's available slots for a specific date
- * @route GET /api/availabilities/doctor/:doctorId/slots
- * @access Public
- */
+// Get doctor's available slots
 exports.getDoctorAvailableSlots = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -21,7 +16,6 @@ exports.getDoctorAvailableSlots = async (req, res) => {
       });
     }
     
-    // Validate date format
     const requestedDate = new Date(date);
     if (isNaN(requestedDate.getTime())) {
       return res.status(400).json({
@@ -30,7 +24,6 @@ exports.getDoctorAvailableSlots = async (req, res) => {
       });
     }
     
-    // Find active availability for the doctor
     const availability = await Availability.findOne({
       doctor: doctorId,
       isActive: true,
@@ -48,24 +41,9 @@ exports.getDoctorAvailableSlots = async (req, res) => {
       });
     }
     
-    console.log(`Found availability for doctor ${doctorId} on date ${requestedDate}`);
-    
-    // Check for overrides on this date
-    const hasOverride = availability.overrides.some(override => {
-      const overrideDate = new Date(override.date);
-      return overrideDate.getFullYear() === requestedDate.getFullYear() &&
-             overrideDate.getMonth() === requestedDate.getMonth() &&
-             overrideDate.getDate() === requestedDate.getDate();
-    });
-    
-    console.log(`Has override for date ${requestedDate}: ${hasOverride}`);
-    
-    // Get available slots for the date
     const availableSlots = availability.getAvailableSlotsForDate(requestedDate);
     
-    // Filter by consultation type if requested
-    if (consultationType && (consultationType === 'clinic' || consultationType === 'video')) {
-      // Only return the specified consultation type
+    if (consultationType && ['clinic', 'video'].includes(consultationType)) {
       return res.status(200).json({
         success: true,
         data: {
@@ -77,7 +55,6 @@ exports.getDoctorAvailableSlots = async (req, res) => {
         }
       });
     } else {
-      // Return both consultation types
       return res.status(200).json({
         success: true,
         data: {
@@ -100,13 +77,7 @@ exports.getDoctorAvailableSlots = async (req, res) => {
   }
 };
 
-
-
-/**
- * Get a single availability by ID
- * @route GET /api/availabilities/:id
- * @access Private
- */
+// Get availability by ID
 exports.getAvailabilityById = async (req, res) => {
   try {
     const availability = await Availability.findById(req.params.id)
@@ -125,7 +96,6 @@ exports.getAvailabilityById = async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    // Check if error is due to invalid ID format
     if (error.kind === 'ObjectId') {
       return res.status(400).json({
         success: false,
@@ -141,96 +111,7 @@ exports.getAvailabilityById = async (req, res) => {
   }
 };
 
-/**
- * Get doctor's available slots for a specific date
- * @route GET /api/availabilities/doctor/:doctorId/slots
- * @access Public
- */
-exports.getDoctorAvailableSlots = async (req, res) => {
-  try {
-    const { doctorId } = req.params;
-    const { date, consultationType } = req.query;
-   
-    if (!date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Date parameter is required'
-      });
-    }
-    const requestedDate = new Date(date);
-   
-    // Check if the requested date is valid
-    if (isNaN(requestedDate.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid date format'
-      });
-    }
-    
-    // Find availability for the doctor
-    const availability = await Availability.findOne({
-      doctor: doctorId,
-      isActive: true,
-      // Only consider schedules that are within the effective date range or have no end date
-      effectiveFrom: { $lte: requestedDate },
-      $or: [
-        { effectiveTo: { $gte: requestedDate } },
-        { effectiveTo: null }  // This handles cases where effectiveTo isn't specified
-      ]
-    });
-    
-    if (!availability) {
-      return res.status(404).json({
-        success: false,
-        message: 'No availability found for this doctor on the specified date'
-      });
-    }
-    
-    // Get available slots for the date
-    const availableSlots = availability.getAvailableSlotsForDate(requestedDate);
-    
-    // Filter by consultation type if requested
-    if (consultationType && (consultationType === 'clinic' || consultationType === 'video')) {
-      // Only return the specified consultation type
-      return res.status(200).json({
-        success: true,
-        data: {
-          date: requestedDate,
-          consultationType,
-          slots: availableSlots[consultationType].slots,
-          fee: availableSlots[consultationType].fee,
-          slotDuration: availability.slotDuration
-        }
-      });
-    } else {
-      // Return both consultation types
-      return res.status(200).json({
-        success: true,
-        data: {
-          date: requestedDate,
-          slotDuration: availability.slotDuration,
-          clinic: {
-            slots: availableSlots.clinic.slots,
-            fee: availableSlots.clinic.fee
-          },
-          video: {
-            slots: availableSlots.video.slots,
-            fee: availableSlots.video.fee
-          }
-        }
-      });
-    }
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Server Error' });
-  }
-};
-
-/**
- * Create a new availability record
- * @route POST /api/availabilities
- * @access Private
- */
+// Create availability
 exports.createAvailability = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -241,7 +122,6 @@ exports.createAvailability = async (req, res) => {
       });
     }
     
-    // Check if doctor already has an active availability
     const existingAvailability = await Availability.findOne({
       doctor: req.body.doctor,
       isActive: true,
@@ -259,7 +139,6 @@ exports.createAvailability = async (req, res) => {
       });
     }
     
-    // Validate that at least one shift has consultationTypes defined
     let hasValidConsultationTypes = false;
     if (req.body.schedule && Array.isArray(req.body.schedule)) {
       for (const daySchedule of req.body.schedule) {
@@ -307,11 +186,7 @@ exports.createAvailability = async (req, res) => {
   }
 };
 
-/**
- * Update an existing availability
- * @route PUT /api/availabilities/:id
- * @access Private
- */
+// Update availability
 exports.updateAvailability = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -322,7 +197,6 @@ exports.updateAvailability = async (req, res) => {
       });
     }
     
-    // Find the availability first
     const availabilityToUpdate = await Availability.findById(req.params.id);
     
     if (!availabilityToUpdate) {
@@ -332,12 +206,10 @@ exports.updateAvailability = async (req, res) => {
       });
     }
     
-    // Update the document fields
     Object.keys(req.body).forEach(key => {
       availabilityToUpdate[key] = req.body[key];
     });
     
-    // Save the updated document (this will run validators)
     await availabilityToUpdate.save();
     
     res.status(200).json({
@@ -369,11 +241,7 @@ exports.updateAvailability = async (req, res) => {
   }
 };
 
-/**
- * Delete an availability
- * @route DELETE /api/availabilities/:id
- * @access Private
- */
+// Delete availability
 exports.deleteAvailability = async (req, res) => {
   try {
     const availability = await Availability.findById(req.params.id);
@@ -385,7 +253,6 @@ exports.deleteAvailability = async (req, res) => {
       });
     }
     
-    // Check if there are any upcoming appointments
     const hasUpcomingAppointments = availability.bookedSlots.some(slot => 
       new Date(slot.date) > new Date() && slot.status === 'booked'
     );
@@ -420,11 +287,7 @@ exports.deleteAvailability = async (req, res) => {
   }
 };
 
-/**
- * Add an override for a specific date
- * @route POST /api/availabilities/:id/override
- * @access Private
- */
+// Add override
 exports.addOverride = async (req, res) => {
   try {
     const { date, isAvailable, shifts, reason } = req.body;
@@ -437,7 +300,7 @@ exports.addOverride = async (req, res) => {
       });
     }
     
-    // Ensure shifts have consultationTypes if available
+    // Validate shifts if available
     if (isAvailable && shifts && shifts.length > 0) {
       for (const shift of shifts) {
         if (!shift.consultationTypes || shift.consultationTypes.length === 0) {
@@ -447,15 +310,30 @@ exports.addOverride = async (req, res) => {
           });
         }
       }
+      
+      // Check for overlapping shifts
+      if (shifts.length > 1) {
+        const sortedShifts = [...shifts].sort((a, b) => 
+          a.startTime.localeCompare(b.startTime)
+        );
+        
+        for (let i = 1; i < sortedShifts.length; i++) {
+          if (sortedShifts[i].startTime < sortedShifts[i-1].endTime) {
+            return res.status(400).json({
+              success: false,
+              message: 'Shifts cannot overlap'
+            });
+          }
+        }
+      }
     }
     
-    // Check if there's already an override for this date
+    const targetDate = new Date(date);
     const existingOverrideIndex = availability.overrides.findIndex(
-      o => new Date(o.date).toDateString() === new Date(date).toDateString()
+      o => isSameDay(o.date, targetDate)
     );
     
     if (existingOverrideIndex !== -1) {
-      // Update existing override
       availability.overrides[existingOverrideIndex] = {
         date,
         isAvailable,
@@ -463,7 +341,6 @@ exports.addOverride = async (req, res) => {
         reason
       };
     } else {
-      // Add new override
       availability.overrides.push({
         date,
         isAvailable,
@@ -489,11 +366,7 @@ exports.addOverride = async (req, res) => {
   }
 };
 
-/**
- * Remove an override for a specific date
- * @route DELETE /api/availabilities/:id/override/:date
- * @access Private
- */
+// Remove override
 exports.removeOverride = async (req, res) => {
   try {
     const { date } = req.params;
@@ -514,9 +387,8 @@ exports.removeOverride = async (req, res) => {
       });
     }
     
-    // Find the index of the override to remove
     const overrideIndex = availability.overrides.findIndex(
-      o => new Date(o.date).toDateString() === targetDate.toDateString()
+      o => isSameDay(o.date, targetDate)
     );
     
     if (overrideIndex === -1) {
@@ -526,7 +398,6 @@ exports.removeOverride = async (req, res) => {
       });
     }
     
-    // Remove the override
     availability.overrides.splice(overrideIndex, 1);
     await availability.save();
     
@@ -552,11 +423,7 @@ exports.removeOverride = async (req, res) => {
   }
 };
 
-/**
- * Update a booked slot status
- * @route PATCH /api/availabilities/:id/slots/:slotId
- * @access Private
- */
+// Update booked slot status
 exports.updateBookedSlotStatus = async (req, res) => {
   try {
     const { id, slotId } = req.params;
@@ -570,7 +437,6 @@ exports.updateBookedSlotStatus = async (req, res) => {
       });
     }
     
-    // Find the booked slot
     const bookedSlot = availability.bookedSlots.id(slotId);
     if (!bookedSlot) {
       return res.status(404).json({
@@ -579,7 +445,6 @@ exports.updateBookedSlotStatus = async (req, res) => {
       });
     }
     
-    // Validate status transitions
     const validTransitions = {
       'booked': ['completed', 'cancelled', 'no_show'],
       'completed': [],
@@ -594,7 +459,6 @@ exports.updateBookedSlotStatus = async (req, res) => {
       });
     }
     
-    // Update the slot status
     bookedSlot.status = status;
     await availability.save();
     
@@ -620,11 +484,7 @@ exports.updateBookedSlotStatus = async (req, res) => {
   }
 };
 
-/**
- * Book a slot
- * @route POST /api/availabilities/:id/book
- * @access Private
- */
+// Book a slot
 exports.bookSlot = async (req, res) => {
   try {
     const { id } = req.params;
@@ -638,7 +498,6 @@ exports.bookSlot = async (req, res) => {
       });
     }
     
-    // Check if the doctor exists
     const doctor = await Doctor.findById(availability.doctor);
     if (!doctor) {
       return res.status(404).json({
@@ -647,7 +506,6 @@ exports.bookSlot = async (req, res) => {
       });
     }
     
-    // Validate appointment ID format
     if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
       return res.status(400).json({
         success: false,
@@ -655,7 +513,6 @@ exports.bookSlot = async (req, res) => {
       });
     }
     
-    // Check if the slot is available
     if (!availability.isSlotAvailable(date, startTime, consultationType)) {
       return res.status(400).json({
         success: false,
@@ -664,7 +521,6 @@ exports.bookSlot = async (req, res) => {
     }
     
     try {
-      // Book the slot
       const result = await availability.bookSlot(date, startTime, consultationType, appointmentId);
       
       res.status(200).json({
@@ -701,3 +557,11 @@ exports.bookSlot = async (req, res) => {
     });
   }
 };
+
+// Helper function for date comparison
+function isSameDay(date1, date2) {
+  if (!date1 || !date2) return false;
+  const d1 = new Date(date1).toISOString().split('T')[0];
+  const d2 = new Date(date2).toISOString().split('T')[0];
+  return d1 === d2;
+}
