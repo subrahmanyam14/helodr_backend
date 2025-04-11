@@ -24,6 +24,12 @@ const paymentSchema = new mongoose.Schema({
         required: true,
         min: 0
     },
+    gstamount:{
+        type:Number  
+    },
+    totalamount:{
+         type:Number
+    },
     status: {
         type: String,
         enum: ["pending", "authorized", "captured", "refunded", "failed", "partially_refunded"],

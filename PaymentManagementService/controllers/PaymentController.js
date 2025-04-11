@@ -13,6 +13,10 @@ exports.processPaypalPayment = async (req, res) => {
     session.startTransaction();
 
     try {
+        // Calculate GST and Total
+        const gstAmount = amount * 0.18;
+        const totalAmount = amount + gstAmount;
+
         // 1. Create a PayPal order
         const request = new checkoutNodeJssdk.orders.OrdersCreateRequest();
         request.prefer("return=representation");
@@ -21,7 +25,7 @@ exports.processPaypalPayment = async (req, res) => {
             purchase_units: [{
                 amount: {
                     currency_code: "USD",
-                    value: amount.toFixed(2)
+                    value: totalAmount.toFixed(2)
                 }
             }]
         });
@@ -41,6 +45,8 @@ exports.processPaypalPayment = async (req, res) => {
             doctor: doctorId,
             patient: patientId,
             amount,
+            gstamount: gstAmount,
+            totalamount: totalAmount,
             status: "captured",
             paymentMethod: "online",
             gateway: {
@@ -54,12 +60,28 @@ exports.processPaypalPayment = async (req, res) => {
         await Transaction.create([{
             user: patientId,
             type: "appointment_payment",
-            amount,
+            amount: totalAmount,
             referenceId: payment[0]._id,
             referenceType: "Payment",
             status: "completed",
             notes: `Payment for appointment ${appointmentId}`
         }], { session });
+
+        // 5. Create notifications
+        await Notification.create([
+            {
+                referenceId: appointmentId,
+                user: patientId,
+                message: "Appointment confirmed",
+                type: "payment"
+            },
+            {
+                referenceId: appointmentId,
+                user: doctorId,
+                message: "Appointment scheduled",
+                type: "payment"
+            }
+        ], { session });
 
         await session.commitTransaction();
         session.endSession();
