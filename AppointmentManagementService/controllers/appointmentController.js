@@ -8,94 +8,99 @@ const mongoose = require('mongoose');
 // @desc    Book an appointment
 // @route   POST /api/appointments
 // @access  Private (Patient)
+
 exports.bookAppointment = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
-    const { doctorId, date, slot, reason, paymentMethod } = req.body;
+    const { doctorId, date, slot, reason, paymentMethod, consultationType } = req.body;
 
-    // 1. Check slot availability
     const availability = await Availability.findOne({ doctor: doctorId }).session(session);
+
     if (!availability) {
-      throw new Error('Doctor availability not found');
+      throw new Error("Doctor availability not found");
     }
 
-    if (!availability.isSlotAvailable(new Date(date), slot)) {
-      throw new Error('Slot is not available');
+    const appointmentDate = new Date(date);
+    const formattedDate = appointmentDate.toISOString().split('T')[0];
+
+    const availableSlots = availability.getAvailableSlotsForDate(appointmentDate);
+
+    if (!availableSlots[consultationType] || !availableSlots[consultationType].slots.includes(slot)) {
+      throw new Error(`The requested slot ${slot} is not available for ${consultationType} consultation`);
     }
 
-    // 2. Create appointment
     const appointment = new Appointment({
       patient: req.user.id,
       doctor: doctorId,
-      date: new Date(date),
+      date: appointmentDate,
+      consultationType,
       slot: {
         startTime: slot,
-        endTime: calculateEndTime(slot, availability.slotDuration)
+        endTime: calculateEndTime(slot, availability.slotDuration || 20),
       },
       reason,
-      status: 'pending',
+      status: "pending",
       payment: {
         method: paymentMethod,
-        status: 'pending'
-      }
+        status: "pending",
+      },
     });
 
     await appointment.save({ session });
 
-    // 3. Book the slot in availability
-    await availability.bookSlot(new Date(date), slot, appointment._id, session);
+    await availability.bookSlot(formattedDate, slot, consultationType, appointment._id);
+    await availability.save({ session });
 
-    // 4. Create payment record
     const payment = new Payment({
       appointment: appointment._id,
       doctor: doctorId,
       patient: req.user.id,
-      amount: await calculateAppointmentFee(doctorId, availability.consultationType),
-      status: 'pending',
-      paymentMethod
+      amount: availableSlots[consultationType].fee || 500,
+      status: "pending",
+      paymentMethod,
     });
 
     await payment.save({ session });
 
-    // 5. Update appointment with payment reference
     appointment.payment = payment._id;
     await appointment.save({ session });
 
-    // 6. Get doctor info for notification
-    const doctor = await Doctor.findById(doctorId).select('user').populate('user', 'fullName').session(session);
+    const doctor = await Doctor.findById(doctorId)
+      .select("user")
+      .populate("user", "fullName")
+      .session(session);
+
     if (!doctor) {
-      throw new Error('Doctor not found');
+      throw new Error("Doctor not found");
     }
 
-    // 7. Create notifications
     await Notification.create(
       [
         {
           user: req.user.id,
-          type: 'appointment_booked',
-          message: `Your appointment with Dr. ${doctor.user.fullName} is booked`,
-          referenceId: appointment._id
+          type: "appointment_booked",
+          message: `Your ${consultationType} appointment with Dr. ${doctor.user.fullName} is booked`,
+          referenceId: appointment._id,
         },
         {
-          user: doctorId,
-          type: 'new_appointment',
-          message: `New appointment booked by ${req.user.fullName}`,
-          referenceId: appointment._id
-        }
+          user: doctor.user._id,
+          type: "new_appointment",
+          message: `New ${consultationType} appointment booked by ${req.user.fullName}`,
+          referenceId: appointment._id,
+        },
       ],
       { session }
     );
 
     await session.commitTransaction();
 
-    res.status(201).json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       data: appointment,
-      paymentId: payment._id // For client to complete payment
+      paymentId: payment._id,
     });
-
   } catch (err) {
     await session.abortTransaction();
     res.status(400).json({ success: false, message: err.message });
@@ -103,6 +108,7 @@ exports.bookAppointment = async (req, res) => {
     session.endSession();
   }
 };
+
 
 // Helper function to calculate end time
 function calculateEndTime(startTime, duration) {

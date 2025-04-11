@@ -4,7 +4,7 @@ const appointmentController = require('../controllers/appointmentController');
 const {authorize, protect} = require('../middleware/auth');
 
 // Book an appointment
-appointmentRouter.post('/', protect, appointmentController.bookAppointment);
+appointmentRouter.post('/book', protect, appointmentController.bookAppointment);
 
 // Get all appointments (with filtering)
 appointmentRouter.get('/', protect, appointmentController.getAppointments);

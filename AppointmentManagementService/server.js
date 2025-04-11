@@ -11,9 +11,9 @@ app.use(express.urlencoded({ extended: true }));
 
 
 app.use("/available-slots", availabilityRouter);
-app.use("/appointment", appointmentRouter);
+app.use("/appointments", appointmentRouter);
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5003;
 app.listen(PORT, async() => {
   console.log(`Server running on port ${PORT}`);
   await connectDB();

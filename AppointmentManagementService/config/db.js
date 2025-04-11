@@ -1,12 +1,15 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
-
-dotenv.config();
+// PORT = 5003
+// MONGO_URI = mongodb+srv://helodr:helodr@cluster0.l0mrggc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+// JWT_SECRET = my-jwt-secret-key
+// dotenv.config();
 
 const connectDB = async () => {
 	try {
 	
-		const conn = await mongoose.connect(process.env.MONGO_URI);
+		// const conn = await mongoose.connect(process.env.MONGO_URI);
+		const conn = await mongoose.connect( 'mongodb+srv://helodr:helodr@cluster0.l0mrggc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
 		console.log(`MongoDB Connected: ${conn.connection.host}`);
 
 		mongoose.connection.on('connected', () => {

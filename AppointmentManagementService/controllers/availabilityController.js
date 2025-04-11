@@ -41,8 +41,55 @@ exports.getDoctorAvailableSlots = async (req, res) => {
       });
     }
     
-    const availableSlots = availability.getAvailableSlotsForDate(requestedDate);
+//     const availableSlots = availability.getAvailableSlotsForDate(requestedDate);
     
+//     if (consultationType && ['clinic', 'video'].includes(consultationType)) {
+//       return res.status(200).json({
+//         success: true,
+//         data: {
+//           date: requestedDate,
+//           consultationType,
+//           slots: availableSlots[consultationType].slots,
+//           fee: availableSlots[consultationType].fee,
+//           slotDuration: availability.slotDuration
+//         }
+//       });
+//     } else {
+//       return res.status(200).json({
+//         success: true,
+//         data: {
+//           date: requestedDate,
+//           slotDuration: availability.slotDuration,
+//           clinic: {
+//             slots: availableSlots.clinic.slots,
+//             fee: availableSlots.clinic.fee
+//           },
+//           video: {
+//             slots: availableSlots.video.slots,
+//             fee: availableSlots.video.fee
+//           }
+//         }
+//       });
+//     }
+//   } catch (err) {
+//     console.error('Error in getDoctorAvailableSlots:', err);
+//     res.status(500).json({ success: false, message: 'Server Error', error: err.message });
+//   }
+// };
+const doctor = await Doctor.findById(doctorId); // ✅
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor not found'
+      });
+    }
+
+    const availableSlots = availability.getAvailableSlotsForDate(requestedDate);
+
+    // 🔄 Get consultation fees from doctor document
+    const clinicFee = doctor.clinicConsultationFee; // ✅
+    const videoFee = doctor.onlineConsultation?.consultationFee || 0; // ✅
+
     if (consultationType && ['clinic', 'video'].includes(consultationType)) {
       return res.status(200).json({
         success: true,
@@ -50,7 +97,7 @@ exports.getDoctorAvailableSlots = async (req, res) => {
           date: requestedDate,
           consultationType,
           slots: availableSlots[consultationType].slots,
-          fee: availableSlots[consultationType].fee,
+          fee: consultationType === 'clinic' ? clinicFee : videoFee, // ✅
           slotDuration: availability.slotDuration
         }
       });
@@ -62,11 +109,11 @@ exports.getDoctorAvailableSlots = async (req, res) => {
           slotDuration: availability.slotDuration,
           clinic: {
             slots: availableSlots.clinic.slots,
-            fee: availableSlots.clinic.fee
+            fee: clinicFee // ✅
           },
           video: {
             slots: availableSlots.video.slots,
-            fee: availableSlots.video.fee
+            fee: videoFee // ✅
           }
         }
       });
@@ -76,7 +123,6 @@ exports.getDoctorAvailableSlots = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server Error', error: err.message });
   }
 };
-
 // Get availability by ID
 exports.getAvailabilityById = async (req, res) => {
   try {
