@@ -14,101 +14,87 @@ exports.bookAppointment = async (req, res) => {
   session.startTransaction();
 
   try {
-    const { doctorId, date, slot, reason, paymentMethod, consultationType } = req.body;
+    const { doctorId, date, slot, reason, appointmentType } = req.body;
+    const userId = req.user.id;
 
+    // Validate required fields
+    if (!doctorId || !date || !slot || !appointmentType) {
+      throw new Error("Missing required fields");
+    }
+
+    // Check doctor availability
     const availability = await Availability.findOne({ doctor: doctorId }).session(session);
-
     if (!availability) {
       throw new Error("Doctor availability not found");
     }
 
     const appointmentDate = new Date(date);
-    const formattedDate = appointmentDate.toISOString().split('T')[0];
-
-    const availableSlots = availability.getAvailableSlotsForDate(appointmentDate);
-
-    if (!availableSlots[consultationType] || !availableSlots[consultationType].slots.includes(slot)) {
-      throw new Error(`The requested slot ${slot} is not available for ${consultationType} consultation`);
+    if (isNaN(appointmentDate.getTime())) {
+      throw new Error("Invalid date format");
     }
 
+    // Check if slot is available
+    const availableSlots = availability.getAvailableSlotsForDate(appointmentDate);
+    if (!availableSlots[appointmentType] || !availableSlots[appointmentType].slots.includes(slot)) {
+      throw new Error(`The requested slot ${slot} is not available for ${appointmentType} consultation`);
+    }
+
+    // Create new appointment
     const appointment = new Appointment({
-      patient: req.user.id,
-      doctor: doctorId,appointmentType: consultationType,
+      patient: userId,
+      doctor: doctorId,
+      appointmentType,
       date: appointmentDate,
-    
       slot: {
         startTime: slot,
         endTime: calculateEndTime(slot, availability.slotDuration || 20),
       },
-      reason,
+      reason: reason || "",
       status: "pending",
-      payment: {
-        method: paymentMethod,
-        status: "pending",
-        amount: 500
-      },
     });
 
+    // Save appointment and update availability
     await appointment.save({ session });
-
-    await availability.bookSlot(formattedDate, slot, consultationType, appointment._id);
+    await availability.bookSlot(appointmentDate.toISOString().split('T')[0], slot, appointmentType, appointment._id);
     await availability.save({ session });
 
-    const payment = new Payment({
-      appointment: appointment._id,
-      doctor: doctorId,
-      patient: req.user.id,
-      amount: availableSlots[consultationType].fee || 500,
-      status: "pending",
-      paymentMethod,
-    });
-
-    await payment.save({ session });
-
-    appointment.payment = payment._id;
-    await appointment.save({ session });
-
+    // Get doctor details for response
     const doctor = await Doctor.findById(doctorId)
       .select("user")
       .populate("user", "fullName")
       .session(session);
-
+    
     if (!doctor) {
       throw new Error("Doctor not found");
     }
-
-    await Notification.create(
-      [
-        {
-          user: req.user.id,
-          type: "appointment_booked",
-          message: `Your ${consultationType} appointment with Dr. ${doctor.user.fullName} is booked`,
-          referenceId: appointment._id,
-        },
-        {
-          user: doctor.user._id,
-          type: "new_appointment",
-          message: `New ${consultationType} appointment booked by ${req.user.fullName}`,
-          referenceId: appointment._id,
-        },
-      ],
-      { session }
-    );
 
     await session.commitTransaction();
 
     res.status(201).json({
       success: true,
       data: appointment,
-      paymentId: payment._id,
+      message: "Appointment booked successfully"
     });
   } catch (err) {
     await session.abortTransaction();
-    res.status(400).json({ success: false, message: err.message });
+    res.status(400).json({ 
+      success: false, 
+      message: err.message || "Failed to book appointment" 
+    });
   } finally {
     session.endSession();
   }
 };
+
+// Helper function to calculate end time
+function calculateEndTime(startTime, durationMinutes) {
+  const [hours, minutes] = startTime.split(':').map(Number);
+  const startDate = new Date();
+  startDate.setHours(hours, minutes, 0, 0);
+  
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
+  return `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`;
+}
 
 
 // Helper function to calculate end time

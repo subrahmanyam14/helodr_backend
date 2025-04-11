@@ -3,6 +3,8 @@ const app = express();
 const connectDB = require('./config/db');
 const availabilityRouter = require("./routes/availabilityRoute");
 const appointmentRouter = require("./routes/appointmentRoute");
+const appointmentCleanup = require('./utils/appointmentCleanup');
+
 
 
 // Middlewares
@@ -17,4 +19,5 @@ const PORT = process.env.PORT || 5003;
 app.listen(PORT, async() => {
   console.log(`Server running on port ${PORT}`);
   await connectDB();
+  appointmentCleanup.startCleanupJob();
 });

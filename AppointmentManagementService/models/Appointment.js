@@ -40,22 +40,9 @@ const appointmentSchema = new mongoose.Schema({
     default: "pending"
   },
   payment: {
-    amount: {
-      type: Number,
-      required: true
-    },
-    status: {
-      type: String,
-      enum: ["pending", "paid", "refunded", "failed"],
-      default: "pending"
-    },
-    method: {
-      type: String,
-      enum: ["netbanking", "upi", "card"],
-      default: "upi"
-    },
-    transactionId: String
-  },
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Payment"
+  },  
   medicalRecords: [{
     type: {
       type: String,
