@@ -33,9 +33,9 @@ exports.bookAppointment = async (req, res) => {
 
     const appointment = new Appointment({
       patient: req.user.id,
-      doctor: doctorId,
+      doctor: doctorId,appointmentType: consultationType,
       date: appointmentDate,
-      consultationType,
+    
       slot: {
         startTime: slot,
         endTime: calculateEndTime(slot, availability.slotDuration || 20),
@@ -45,6 +45,7 @@ exports.bookAppointment = async (req, res) => {
       payment: {
         method: paymentMethod,
         status: "pending",
+        amount: 500
       },
     });
 
