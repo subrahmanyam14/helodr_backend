@@ -19,10 +19,26 @@ const twilioClient = twilio(
             to: to
         });
     } catch (twilioError) {
-        console.error('Twilio error:', twilioError);
+        console.error('Twilio error: in sendOTP', twilioError);
         throw new Error('Failed to send OTP: ' + twilioError.message);
     }
 };
+
+const sendMessage = async( to, message ) => {
+    try {
+        await twilioClient.messages.create({
+            body: message,
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: to
+        });
+    } catch (error) {
+        console.error('Twilio error: in sendMessage', error);
+        throw new Error('Failed to send message: ' + error.message);
+    }
+}
+
+
+
 
 
 smsRouter.post('/sendOTP', async (req, res) => {
@@ -44,5 +60,23 @@ smsRouter.post('/sendOTP', async (req, res) => {
   }
 });
 
-
+smsRouter.post('/sendMessage', async (req, res) => {
+    try {
+        const { to, message } = req.body;
+        if (!to || !message) {
+            return res.status(400).json({ success: false, message: "Phone number and message are required." });
+        }
+  
+        await sendMessage(to, message);
+  
+        return res.status(200).json({ success: true, message: 'message sent successfully' });
+    } catch (error) {
+        console.error('Error sending message:', error);
+  
+        if (!res.headersSent) {
+            return res.status(500).json({ success: false, message: error.message });
+        }
+    }
+  });
+  
 module.exports = smsRouter;
