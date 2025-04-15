@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const {processPaypalPayment} = require('../controllers/PaymentController');
+const PaymentController = require("../controllers/PaymentController");
 
-router.post('/', processPaypalPayment);
+// These two should be real functions exported from the controller
+router.post("/create-paypal-order", PaymentController.createPaypalOrder);
+router.post("/capture-paypal-order", PaymentController.capturePaypalOrder);
 
 module.exports = router;

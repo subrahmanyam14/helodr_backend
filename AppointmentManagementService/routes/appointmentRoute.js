@@ -18,4 +18,13 @@ appointmentRouter.put('/:id/status', protect, appointmentController.updateAppoin
 // Add prescription to appointment
 appointmentRouter.put('/:id/prescription', protect, authorize("doctor"), appointmentController.addPrescription);
 
+// Get upcoming video appointments
+appointmentRouter.get('/doctor/:doctorId/upcoming/video', appointmentController.getUpcomingVideoAppointments);
+
+// Get upcoming clinic appointments
+appointmentRouter.get('/doctor/:doctorId/upcoming/clinic', appointmentController.getUpcomingClinicAppointments);
+
+// Get cancelled appointments
+appointmentRouter.get('/doctor/:doctorId/cancelled', appointmentController.getCancelledAppointments);
+
 module.exports = appointmentRouter;

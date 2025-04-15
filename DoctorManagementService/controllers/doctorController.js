@@ -128,7 +128,8 @@ const DoctorController = {
     }
   },
   
-  // Add or update hospital affiliations
+
+  // Ad d or update hospital affiliations
   addHospitalAffiliation: async (req, res) => {
     try {
       const { doctorId } = req.params;

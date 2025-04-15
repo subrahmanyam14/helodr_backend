@@ -322,3 +322,52 @@ async function calculateAppointmentFee(doctorId, consultationType) {
       return doctor.consultationFee;
   }
 }
+
+
+//  Upcoming Video Appointments
+exports.getUpcomingVideoAppointments = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const now = new Date();
+    const appointments = await Appointment.find({
+      doctor: doctorId,
+      appointmentType: 'video',
+      date: { $gte: now },
+      status: { $in: ['pending', 'confirmed'] }
+    }).populate('patient');
+    res.status(200).json(appointments);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch video appointments' });
+  }
+};
+
+//  Upcoming Clinic Appointments
+exports.getUpcomingClinicAppointments = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const now = new Date();
+    const appointments = await Appointment.find({
+      doctor: doctorId,
+      appointmentType: 'clinic',
+      date: { $gte: now },
+      status: { $in: ['pending', 'confirmed'] }
+    }).populate('patient');
+    res.status(200).json(appointments);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch clinic appointments' });
+  }
+};
+
+//  Cancelled Appointments
+exports.getCancelledAppointments = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const appointments = await Appointment.find({
+      doctor: doctorId,
+      status: 'cancelled'
+    }).populate('patient');
+    res.status(200).json(appointments);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch cancelled appointments' });
+  }
+};
