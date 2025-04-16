@@ -39,6 +39,25 @@ const createDefaultWallet = async (doctorId) => {
   }
 };
 
+const calculateDistance = (coords1, coords2) => {
+  const [lon1, lat1] = coords1;
+  const [lon2, lat2] = coords2;
+  
+  const R = 6371; // Radius of the Earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distance = R * c; // Distance in km
+  
+  return distance;
+};
+
 const DoctorController = {
   // Register a new doctor
   registerDoctor: async (req, res) => {
@@ -548,7 +567,206 @@ const DoctorController = {
         error: error.message
       });
     }
+  },
+
+  searchDoctors: async (searchParams = {}, page = 1, limit = 10) => {
+    try {
+      const query = {};
+      
+      // Build query based on search parameters
+      if (searchParams.specialization) {
+        query.specialization = { $regex: new RegExp(searchParams.specialization, 'i') };
+      }
+      
+      if (searchParams.subSpecializations && searchParams.subSpecializations.length > 0) {
+        query.subSpecializations = { 
+          $in: searchParams.subSpecializations.map(sub => new RegExp(sub, 'i')) 
+        };
+      }
+      
+      // Location filters
+      if (searchParams.city) {
+        query['address.city'] = { $regex: new RegExp(searchParams.city, 'i') };
+      }
+      
+      if (searchParams.state) {
+        query['address.state'] = { $regex: new RegExp(searchParams.state, 'i') };
+      }
+      
+      if (searchParams.pinCode) {
+        query['address.pinCode'] = searchParams.pinCode;
+      }
+      
+      // Verification status filter
+      if (searchParams.isVerified !== undefined) {
+        query['verification.status'] = searchParams.isVerified ? 'verified' : { $ne: 'verified' };
+      }
+      
+      // Active status filter
+      if (searchParams.isActive !== undefined) {
+        query.isActive = searchParams.isActive;
+      }
+      
+      // Execute the query with pagination
+      const skip = (page - 1) * limit;
+      
+      const doctors = await Doctor.find(query)
+        .populate('user', 'name email profileImage phoneNumber')
+        .populate('hospitalAffiliations.hospital', 'name address')
+        .sort({ experience: -1 }) // Sort by experience (descending)
+        .skip(skip)
+        .limit(limit);
+      
+      // Get total count for pagination
+      const totalDoctors = await Doctor.countDocuments(query);
+      
+      return {
+        doctors,
+        pagination: {
+          total: totalDoctors,
+          page,
+          limit,
+          pages: Math.ceil(totalDoctors / limit)
+        }
+      };
+    } catch (error) {
+      throw new Error(`Error searching doctors: ${error.message}`);
+    }
+  },
+  findNearbyDoctors: async (coordinates, maxDistance = 10000, filters = {}, page = 1, limit = 10) => {
+    try {
+      if (!coordinates || !Array.isArray(coordinates) || coordinates.length !== 2) {
+        throw new Error('Valid coordinates [longitude, latitude] are required');
+      }
+      
+      const [longitude, latitude] = coordinates;
+      
+      // Build geo query
+      const geoQuery = {
+        'address.coordinates': {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [longitude, latitude]
+            },
+            $maxDistance: maxDistance
+          }
+        }
+      };
+      
+      // Add additional filters
+      if (filters.specialization) {
+        geoQuery.specialization = { $regex: new RegExp(filters.specialization, 'i') };
+      }
+      
+      if (filters.subSpecializations && filters.subSpecializations.length > 0) {
+        geoQuery.subSpecializations = { 
+          $in: filters.subSpecializations.map(sub => new RegExp(sub, 'i')) 
+        };
+      }
+      
+      if (filters.isVerified !== undefined) {
+        geoQuery['verification.status'] = filters.isVerified ? 'verified' : { $ne: 'verified' };
+      }
+      
+      if (filters.isActive !== undefined) {
+        geoQuery.isActive = filters.isActive;
+      }
+      
+      // Execute query with pagination
+      const skip = (page - 1) * limit;
+      
+      const doctors = await Doctor.find(geoQuery)
+        .populate('user', 'name email profileImage phoneNumber')
+        .populate('hospitalAffiliations.hospital', 'name address')
+        .skip(skip)
+        .limit(limit);
+      
+      // Calculate distance for each doctor and add it to the result
+      doctors.forEach(doctor => {
+        if (doctor.address && doctor.address.coordinates) {
+          const docCoords = doctor.address.coordinates;
+          const distance = calculateDistance(
+            [longitude, latitude],
+            docCoords
+          );
+          doctor._doc.distance = parseFloat(distance.toFixed(2)); // Add distance in km
+        }
+      });
+      
+      // Sort by distance
+      doctors.sort((a, b) => (a._doc.distance || Infinity) - (b._doc.distance || Infinity));
+      
+      // Get total count for pagination
+      const totalNearbyDoctors = await Doctor.countDocuments(geoQuery);
+      
+      return {
+        doctors,
+        pagination: {
+          total: totalNearbyDoctors,
+          page,
+          limit,
+          pages: Math.ceil(totalNearbyDoctors / limit)
+        }
+      };
+    } catch (error) {
+      throw new Error(`Error finding nearby doctors: ${error.message}`);
+    }
+  },
+
+
+  findDoctorsByHospital: async (hospitalId, filters = {}, page = 1, limit = 10) => {
+    try {
+      if (!mongoose.Types.ObjectId.isValid(hospitalId)) {
+        throw new Error('Invalid hospital ID');
+      }
+      
+      const query = {
+        'hospitalAffiliations.hospital': hospitalId
+      };
+      
+      // Add additional filters
+      if (filters.specialization) {
+        query.specialization = { $regex: new RegExp(filters.specialization, 'i') };
+      }
+      
+      if (filters.isVerified !== undefined) {
+        query['verification.status'] = filters.isVerified ? 'verified' : { $ne: 'verified' };
+      }
+      
+      if (filters.isActive !== undefined) {
+        query.isActive = filters.isActive;
+      }
+      
+      // Execute query with pagination
+      const skip = (page - 1) * limit;
+      
+      const doctors = await Doctor.find(query)
+        .populate('user', 'name email profileImage phoneNumber')
+        .populate('hospitalAffiliations.hospital', 'name address')
+        .skip(skip)
+        .limit(limit);
+      
+      // Get total count for pagination
+      const totalDoctors = await Doctor.countDocuments(query);
+      
+      return {
+        doctors,
+        pagination: {
+          total: totalDoctors,
+          page,
+          limit,
+          pages: Math.ceil(totalDoctors / limit)
+        }
+      };
+    } catch (error) {
+      throw new Error(`Error finding doctors by hospital: ${error.message}`);
+    }
   }
+
 };
+
+
+
 
 module.exports = DoctorController;
