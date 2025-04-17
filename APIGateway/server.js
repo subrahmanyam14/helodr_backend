@@ -33,7 +33,7 @@ proxy.on('proxyReq', (proxyReq, req, res, options) => {
 
 // Timeout middleware (optional)
 app.use((req, res, next) => {
-  res.setTimeout(15000, () => {
+  res.setTimeout(150000, () => {
     console.warn(`Request timed out: ${req.method} ${req.url}`);
     res.status(504).json({ error: 'Gateway Timeout' });
   });

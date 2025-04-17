@@ -4,6 +4,17 @@ const DoctorController = require('../controllers/doctorController');
 const { protect, authorize } = require('../middleware/auth');
 
 
+// Search doctors
+router.get('/search', DoctorController.searchDoctors);
+
+// Find nearby doctors
+router.get('/nearby', DoctorController.findNearbyDoctors);
+
+// Find doctors by hospital
+router.get('/hospital/:hospitalId', DoctorController.findDoctorsByHospital);
+
+router.post("/dummy", DoctorController.insertDummyData);
+
 // Doctor registration routes
 router.post(
   '/register',
@@ -89,150 +100,5 @@ router.get(
   DoctorController.getDoctorProfile
 );
 
-router.get('/search', async (req, res) => {
-  try {
-    const {
-      specialization,
-      subSpecializations,
-      city,
-      state,
-      pinCode,
-      isVerified,
-      isActive,
-      page = 1,
-      limit = 10
-    } = req.query;
-
-    // Parse query parameters
-    const searchParams = {
-      specialization,
-      city,
-      state,
-      pinCode
-    };
-
-    // Parse boolean values
-    if (isVerified !== undefined) {
-      searchParams.isVerified = isVerified === 'true';
-    }
-    
-    if (isActive !== undefined) {
-      searchParams.isActive = isActive === 'true';
-    }
-    
-    // Parse array values
-    if (subSpecializations) {
-      searchParams.subSpecializations = Array.isArray(subSpecializations) 
-        ? subSpecializations 
-        : [subSpecializations];
-    }
-
-    const results = await searchDoctors(
-      searchParams,
-      parseInt(page),
-      parseInt(limit)
-    );
-
-    res.json(results);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * @route   GET /api/doctors/nearby
- * @desc    Find nearby doctors based on coordinates
- * @access  Public
- */
-router.get('/nearby', async (req, res) => {
-  try {
-    const {
-      longitude,
-      latitude,
-      maxDistance = 10000, // Default 10km
-      specialization,
-      subSpecializations,
-      isVerified,
-      isActive,
-      page = 1,
-      limit = 10
-    } = req.query;
-
-    if (!longitude || !latitude) {
-      return res.status(400).json({ error: 'Longitude and latitude are required' });
-    }
-
-    const coordinates = [parseFloat(longitude), parseFloat(latitude)];
-    
-    // Parse filters
-    const filters = { specialization };
-    
-    if (isVerified !== undefined) {
-      filters.isVerified = isVerified === 'true';
-    }
-    
-    if (isActive !== undefined) {
-      filters.isActive = isActive === 'true';
-    }
-    
-    if (subSpecializations) {
-      filters.subSpecializations = Array.isArray(subSpecializations) 
-        ? subSpecializations 
-        : [subSpecializations];
-    }
-
-    const results = await findNearbyDoctors(
-      coordinates,
-      parseFloat(maxDistance),
-      filters,
-      parseInt(page),
-      parseInt(limit)
-    );
-
-    res.json(results);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * @route   GET /api/doctors/hospital/:hospitalId
- * @desc    Find doctors affiliated with a specific hospital
- * @access  Public
- */
-router.get('/hospital/:hospitalId', async (req, res) => {
-  try {
-    const { hospitalId } = req.params;
-    const {
-      specialization,
-      isVerified,
-      isActive,
-      page = 1,
-      limit = 10
-    } = req.query;
-
-    // Parse filters
-    const filters = { specialization };
-    
-    if (isVerified !== undefined) {
-      filters.isVerified = isVerified === 'true';
-    }
-    
-    if (isActive !== undefined) {
-      filters.isActive = isActive === 'true';
-    }
-
-    const results = await findDoctorsByHospital(
-      hospitalId,
-      filters,
-      parseInt(page),
-      parseInt(limit)
-    );
-
-    res.json(results);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 module.exports = router;
