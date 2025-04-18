@@ -79,7 +79,8 @@ exports.login = async (req, res) => {
           mobileNumber: user.mobileNumber,
           countryCode: user.countryCode,
           profilePhoto: user.profilePhoto,
-          role: user.role
+          role: user.role,
+          id: user._id
         },
         token
       });

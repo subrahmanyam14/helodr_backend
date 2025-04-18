@@ -24,11 +24,11 @@ const paymentSchema = new mongoose.Schema({
         required: true,
         min: 0
     },
-    gstamount:{
-        type:Number  
+    gstamount: {
+        type: Number
     },
-    totalamount:{
-         type:Number
+    totalamount: {
+        type: Number
     },
     status: {
         type: String,
@@ -62,15 +62,15 @@ const paymentSchema = new mongoose.Schema({
 });
 
 // Create payment and transaction record
-paymentSchema.statics.createPayment = async function(paymentData) {
+paymentSchema.statics.createPayment = async function (paymentData) {
     const session = await mongoose.startSession();
     session.startTransaction();
-    
+
     try {
         // Create the payment
         const payment = new this(paymentData);
         await payment.save({ session });
-        
+
         // Create transaction record for patient
         await Transaction.createTransaction({
             user: payment.patient,
@@ -81,10 +81,10 @@ paymentSchema.statics.createPayment = async function(paymentData) {
             status: payment.status === "captured" ? "completed" : "pending",
             notes: `Payment for appointment ${payment.appointment}`
         }, { session });
-        
+
         await session.commitTransaction();
         session.endSession();
-        
+
         return payment;
     } catch (error) {
         await session.abortTransaction();
@@ -94,50 +94,74 @@ paymentSchema.statics.createPayment = async function(paymentData) {
 };
 
 // Process payment and distribute to doctor
-paymentSchema.methods.processPayment = async function() {
+paymentSchema.methods.processPayment = async function () {
     if (this.status !== 'captured') {
         throw new Error('Payment must be captured before processing');
     }
-    
+
+    console.log(`Starting payment processing for payment ID: ${this._id}, Amount: ${this.amount}`);
+
     const session = await mongoose.startSession();
     session.startTransaction();
-    
+
     try {
-        const wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
-        
+        console.log('Transaction session started');
+
+        // Find or create wallet within the same session
+        let wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
+        console.log('Wallet found/created:', wallet ? wallet._id : 'new wallet');
+
         if (!wallet) {
-            throw new Error('Doctor wallet not found');
+            wallet = new Wallet({
+                doctor: this.doctor,
+                current_balance: 0,
+                total_earned: 0,
+                last_payment_date: new Date()
+            });
+            await wallet.save({ session });
+            console.log('New wallet created for doctor:', this.doctor);
         }
-        
+
         const commission = wallet.commission_rate || 20;
         const platformCommission = this.amount * (commission / 100);
         const doctorShare = this.amount - platformCommission;
-        
-        // Update doctor's wallet
+
+        console.log(`Calculated - Total: ${this.amount}, Commission: ${platformCommission}, Doctor Share: ${doctorShare}`);
+
+        // Update doctor's wallet with session
         await wallet.addFunds(
             doctorShare,
             'appointment',
             `Payment for appointment ${this.appointment}`,
-            this.appointment
+            this._id,
+            session
         );
-        
+        console.log('Funds added to doctor wallet');
+
         // Update transaction record for patient
-        const patientTransaction = await Transaction.findOne({
-            user: this.patient,
-            referenceId: this._id,
-            type: "appointment_payment"
-        }).session(session);
-        
-        if (patientTransaction && patientTransaction.status !== "completed") {
-            patientTransaction.status = "completed";
-            await patientTransaction.save({ session });
-        }
-        
+        await Transaction.updateOne(
+            {
+                user: this.patient,
+                referenceId: this._id,
+                type: "appointment_payment"
+            },
+            { $set: { status: "completed" } },
+            { session }
+        );
+        console.log('Patient transaction updated');
+
         await session.commitTransaction();
         session.endSession();
-        
-        return { doctorShare, platformCommission };
+        console.log('Transaction committed successfully');
+
+        return { 
+            doctorShare, 
+            platformCommission,
+            walletBalance: wallet.current_balance,
+            totalEarned: wallet.total_earned
+        };
     } catch (error) {
+        console.error('Error in processPayment:', error);
         await session.abortTransaction();
         session.endSession();
         throw error;
@@ -145,18 +169,18 @@ paymentSchema.methods.processPayment = async function() {
 };
 
 // Process refund
-paymentSchema.methods.processRefund = async function(refundAmount, reason, initiatedBy) {
+paymentSchema.methods.processRefund = async function (refundAmount, reason, initiatedBy) {
     if (this.status !== 'captured') {
         throw new Error('Payment must be captured before refunding');
     }
-    
+
     if (refundAmount > this.amount) {
         throw new Error('Refund amount cannot exceed payment amount');
     }
-    
+
     const session = await mongoose.startSession();
     session.startTransaction();
-    
+
     try {
         // Update payment with refund details
         this.refund = {
@@ -165,10 +189,10 @@ paymentSchema.methods.processRefund = async function(refundAmount, reason, initi
             initiatedBy,
             status: "processed"
         };
-        
+
         this.status = refundAmount === this.amount ? "refunded" : "partially_refunded";
         await this.save({ session });
-        
+
         // Create refund transaction for patient
         await Transaction.createTransaction({
             user: this.patient,
@@ -179,23 +203,23 @@ paymentSchema.methods.processRefund = async function(refundAmount, reason, initi
             status: "completed",
             notes: `Refund for appointment ${this.appointment}: ${reason}`
         }, { session });
-        
+
         // If doctor already received payment, adjust wallet
         if (refundAmount > 0) {
             const wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
-            
+
             if (wallet) {
                 // Calculate the doctor's portion of the refund
                 const commission = wallet.commission_rate || 20;
                 const doctorSharePercentage = (100 - commission) / 100;
                 const doctorRefundAmount = refundAmount * doctorSharePercentage;
-                
+
                 // Only deduct if wallet has sufficient balance
                 if (wallet.current_balance >= doctorRefundAmount) {
                     wallet.current_balance -= doctorRefundAmount;
                     wallet.total_earned -= doctorRefundAmount; // Adjust total earned
                     await wallet.save({ session });
-                    
+
                     // Create transaction for doctor refund deduction
                     await Transaction.createTransaction({
                         user: this.doctor,
@@ -209,10 +233,10 @@ paymentSchema.methods.processRefund = async function(refundAmount, reason, initi
                 }
             }
         }
-        
+
         await session.commitTransaction();
         session.endSession();
-        
+
         return this;
     } catch (error) {
         await session.abortTransaction();

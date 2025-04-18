@@ -37,7 +37,7 @@ const WalletSchema = new mongoose.Schema({
 });
 
 // Add method to update wallet balance
-WalletSchema.methods.addFunds = async function(amount, source, description, referenceId) {
+WalletSchema.methods.addFunds = async function(amount, source, description, referenceId, session = null) {
     if (amount <= 0) {
         throw new Error('Amount must be positive');
     }
@@ -47,7 +47,8 @@ WalletSchema.methods.addFunds = async function(amount, source, description, refe
     this.total_earned += amount;
     this.last_payment_date = new Date();
     
-    await this.save();
+    const options = session ? { session } : {};
+    await this.save(options);
     
     // Create a transaction record
     await Transaction.createTransaction({
@@ -58,7 +59,7 @@ WalletSchema.methods.addFunds = async function(amount, source, description, refe
         referenceType: source === 'appointment' ? "Appointment" : "Payment",
         status: "completed",
         notes: description
-    });
+    }, options);
 
     return this;
 };
