@@ -694,7 +694,6 @@ const DoctorController = {
       const {
         longitude,
         latitude,
-        maxDistance = 10000,
         specialization,
         subSpecializations,
         page = 1,
@@ -713,12 +712,11 @@ const DoctorController = {
       const pageNum = Math.max(1, parseInt(page));
       const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
       
-      // Build base query
+      // Build base query without distance restriction
       const query = {
         'address.coordinates': {
-          $geoWithin: {
-            $centerSphere: [coords, parseFloat(maxDistance) / 6378137] // Convert meters to radians
-          }
+          $exists: true,
+          $ne: null
         },
         isActive: true
       };
@@ -740,31 +738,32 @@ const DoctorController = {
         }
       }
       
-      // Execute query
-      const skip = (pageNum - 1) * limitNum;
-      
-      const doctors = await Doctor.find(query)
+      // First get all matching doctors
+      const allDoctors = await Doctor.find(query)
         .populate('user', 'fullName profilePhoto')
         .populate('hospitalAffiliations.hospital', 'name address')
-        .skip(skip)
-        .limit(limitNum)
         .lean();
       
       // Calculate distances and add to each doctor object
-      doctors.forEach(doctor => {
+      allDoctors.forEach(doctor => {
         if (doctor.address?.coordinates) {
           const distance = calculateDistance(
             coords,
             doctor.address.coordinates
           );
           doctor.distance = parseFloat(distance.toFixed(2));
+        } else {
+          doctor.distance = Infinity; // Handle cases where coordinates might be missing
         }
       });
       
-      // Sort by distance
-      doctors.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
+      // Sort by distance (nearest first)
+      allDoctors.sort((a, b) => a.distance - b.distance);
       
-      const total = await Doctor.countDocuments(query);
+      // Apply pagination
+      const total = allDoctors.length;
+      const skip = (pageNum - 1) * limitNum;
+      const doctors = allDoctors.slice(skip, skip + limitNum);
       
       // Format response
       res.json({
@@ -775,7 +774,7 @@ const DoctorController = {
           page: pageNum,
           limit: limitNum,
           pages: Math.ceil(total / limitNum),
-          hasNext: pageNum * limitNum < total
+          hasNext: skip + limitNum < total
         }
       });
     } catch (error) {
@@ -885,8 +884,17 @@ const DoctorController = {
       console.log("Error in the insertDummyData, ", error);
       res.status(500).send({error: "Internal server error...", success: false});
     }
-  }
+  },
 
+  getAllHospitals: async( req, res) => {
+    try {
+      const hospitals = await Hospital.find().select("name");
+      res.status(200).send({success: true, hospitals});
+    } catch (error) {
+      console.log("Error in the getAllHospitals, ", error);
+      res.status(500).send({error: "Internal server error...", success: false});
+    }
+  }
  
 };
 
