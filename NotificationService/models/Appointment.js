@@ -109,6 +109,9 @@ const appointmentSchema = new mongoose.Schema({
       default: Date.now
     }
   },
+  videoConferenceLink: {
+    type: String
+  },
   cancellation: {
     initiatedBy: {
       type: String,

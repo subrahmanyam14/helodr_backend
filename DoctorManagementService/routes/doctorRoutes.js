@@ -4,6 +4,17 @@ const DoctorController = require('../controllers/doctorController');
 const { protect, authorize } = require('../middleware/auth');
 
 
+// Search doctors
+router.get('/search', DoctorController.searchDoctors);
+
+// Find nearby doctors
+router.get('/nearby', DoctorController.findNearbyDoctors);
+
+// Find doctors by hospital
+router.get('/hospital/:hospitalId', DoctorController.findDoctorsByHospital);
+
+router.post("/dummy", DoctorController.insertDummyData);
+
 // Doctor registration routes
 router.post(
   '/register',
@@ -88,5 +99,6 @@ router.get(
   
   DoctorController.getDoctorProfile
 );
+
 
 module.exports = router;

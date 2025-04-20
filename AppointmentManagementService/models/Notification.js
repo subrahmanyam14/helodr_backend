@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const paymentSchema = new mongoose.Schema({
+const notificationSchema = new mongoose.Schema({
     referenceId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Appointment",
@@ -17,10 +17,23 @@ const paymentSchema = new mongoose.Schema({
     },
     type: {
         type: String,
+    },
+    status: {
+        type: String,
+        enum: ["pending", "sent", "failed", "cancelled"],
+        default: "pending"
+    },
+    sentAt: {
+        type: Date
+    },
+    error: {
+        type: String
     }
 },
     {
         timestamps: true
     });
 
-const Payment = mongoose.model("Notification", paymentSchema);
+const Notification = mongoose.model("Notification", notificationSchema);
+
+module.exports = Notification

@@ -71,7 +71,7 @@ const createHTML = (fullName, email, token, url) => {
                                     Verify Your Email Address</h1>
                                 <p
                                     style="margin: 0 0 25px; font-size: 16px; line-height: 1.6; color: #555555; text-align: center;">
-                                    Hi <strong>{{fullName}}</strong>, thank you for signing up with HeloDr. To complete your
+                                    Hi <strong>${fullName}</strong>, thank you for signing up with HeloDr. To complete your
                                     registration and access our healthcare
                                     services, please verify your email address.
                                 </p>

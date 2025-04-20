@@ -5,6 +5,7 @@ const Settings = require('../models/Settings');
 const Wallet = require('../models/Wallet');
 const Statistics = require('../models/Statistics');
 const mongoose = require('mongoose');
+const User = require('../models/User');
 
 // Helper functions
 const createDefaultWallet = async (doctorId) => {
@@ -37,6 +38,31 @@ const createDefaultWallet = async (doctorId) => {
   } catch (error) {
     throw new Error(`Error creating wallet: ${error.message}`);
   }
+};
+
+const calculateDistance = (coords1, coords2) => {
+  const [lon1, lat1] = coords1;
+  const [lon2, lat2] = coords2;
+  
+  const R = 6371; // Radius of the Earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distance = R * c; // Distance in km
+  
+  return distance;
+};
+
+
+const sanitizeRegex = (str) => {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
 const DoctorController = {
@@ -548,7 +574,323 @@ const DoctorController = {
         error: error.message
       });
     }
+  },
+  searchDoctors: async (req, res) => {
+    try {
+      const {
+        specialization,
+        subSpecializations,
+        city,
+        state,
+        pinCode,
+        page = 1,
+        limit = 15
+      } = req.query;
+
+      // Validate and parse pagination
+      const pageNum = Math.max(1, parseInt(page));
+      const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
+
+      // Build query - only active and verified doctors
+      const query = {
+        isActive: true,
+        // 'verification.status': 'verified' // Changed from boolean to string match
+      };
+      
+      // Add search filters
+      if (specialization) {
+        query.specialization = { 
+          $regex: sanitizeRegex(specialization), 
+          $options: 'i' 
+        };
+      }
+      
+      if (subSpecializations) {
+        const subSpecs = Array.isArray(subSpecializations) 
+          ? subSpecializations 
+          : [subSpecializations];
+        
+        if (subSpecs.length > 0) {
+          query.subSpecializations = { 
+            $in: subSpecs.map(sub => new RegExp(sanitizeRegex(sub), 'i'))
+          };
+        }
+      }
+      
+      if (city) {
+        query['address.city'] = { 
+          $regex: sanitizeRegex(city), 
+          $options: 'i' 
+        };
+      }
+      
+      if (state) {
+        query['address.state'] = { 
+          $regex: sanitizeRegex(state), 
+          $options: 'i' 
+        };
+      }
+      
+      if (pinCode) {
+        query['address.pinCode'] = String(pinCode).trim();
+      }
+      
+      // Execute query
+      const skip = (pageNum - 1) * limitNum;
+      
+      const doctors = await Doctor.find(query)
+        .populate('user', 'fullName profilePhoto _id')
+        .populate({
+          path: 'hospitalAffiliations.hospital',
+          select: 'name address',
+          match: { isActive: true } // Only include active hospitals
+        })
+        .sort({ experience: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean();
+      
+      // Filter out any null hospital affiliations
+      const filteredDoctors = doctors.map(doctor => {
+        if (doctor.hospitalAffiliations) {
+          doctor.hospitalAffiliations = doctor.hospitalAffiliations.filter(
+            aff => aff.hospital !== null
+          );
+        }
+        return doctor;
+      });
+      
+      const total = await Doctor.countDocuments(query);
+      
+      // Format response
+      res.json({
+        success: true,
+        data: filteredDoctors,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          pages: Math.ceil(total / limitNum),
+          hasNext: pageNum * limitNum < total
+        }
+      });
+    } catch (error) {
+      console.error('Search doctors error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to search doctors',
+        error: error.message
+      });
+    }
+  },
+
+  /**
+   * @route GET /api/doctors/nearby
+   * @desc Find nearby doctors using geospatial query
+   * @access Public
+   */
+  findNearbyDoctors: async (req, res) => {
+    try {
+      const {
+        longitude,
+        latitude,
+        maxDistance = 10000,
+        specialization,
+        subSpecializations,
+        page = 1,
+        limit = 15
+      } = req.query;
+      
+      // Validate coordinates
+      if (!longitude || !latitude) {
+        return res.status(400).json({
+          success: false,
+          message: 'Longitude and latitude are required'
+        });
+      }
+      
+      const coords = [parseFloat(longitude), parseFloat(latitude)];
+      const pageNum = Math.max(1, parseInt(page));
+      const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
+      
+      // Build base query
+      const query = {
+        'address.coordinates': {
+          $geoWithin: {
+            $centerSphere: [coords, parseFloat(maxDistance) / 6378137] // Convert meters to radians
+          }
+        },
+        isActive: true
+      };
+      
+      // Add filters
+      if (specialization) {
+        query.specialization = { $regex: sanitizeRegex(specialization), $options: 'i' };
+      }
+      
+      if (subSpecializations) {
+        const subSpecs = Array.isArray(subSpecializations)
+          ? subSpecializations
+          : [subSpecializations];
+        
+        if (subSpecs.length > 0) {
+          query.subSpecializations = {
+            $in: subSpecs.map(sanitizeRegex)
+          };
+        }
+      }
+      
+      // Execute query
+      const skip = (pageNum - 1) * limitNum;
+      
+      const doctors = await Doctor.find(query)
+        .populate('user', 'fullName profilePhoto')
+        .populate('hospitalAffiliations.hospital', 'name address')
+        .skip(skip)
+        .limit(limitNum)
+        .lean();
+      
+      // Calculate distances and add to each doctor object
+      doctors.forEach(doctor => {
+        if (doctor.address?.coordinates) {
+          const distance = calculateDistance(
+            coords,
+            doctor.address.coordinates
+          );
+          doctor.distance = parseFloat(distance.toFixed(2));
+        }
+      });
+      
+      // Sort by distance
+      doctors.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
+      
+      const total = await Doctor.countDocuments(query);
+      
+      // Format response
+      res.json({
+        success: true,
+        data: doctors,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          pages: Math.ceil(total / limitNum),
+          hasNext: pageNum * limitNum < total
+        }
+      });
+    } catch (error) {
+      console.error('Nearby doctors error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to find nearby doctors',
+        error: error.message
+      });
+    }
+  },
+
+  /**
+   * @route GET /api/doctors/hospital/:hospitalId
+   * @desc Find doctors by hospital affiliation
+   * @access Public
+   */
+  findDoctorsByHospital: async (req, res) => {
+    try {
+      const { hospitalId } = req.params;
+      const {
+        specialization,
+        isVerified,
+        isActive,
+        page = 1,
+        limit = 10
+      } = req.query;
+
+      // Validate hospital ID
+      if (!mongoose.Types.ObjectId.isValid(hospitalId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid hospital ID'
+        });
+      }
+
+      const pageNum = Math.max(1, parseInt(page));
+      const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
+
+      // Build query
+      const query = {
+        'hospitalAffiliations.hospital': hospitalId
+      };
+      
+      if (specialization) {
+        query.specialization = { $regex: sanitizeRegex(specialization), $options: 'i' };
+      }
+      
+      if (isVerified !== undefined) {
+        query['verification.status'] = isVerified === 'true' ? 'verified' : { $ne: 'verified' };
+      }
+      
+      if (isActive !== undefined) {
+        query.isActive = isActive === 'true';
+      }
+      
+      // Execute query
+      const skip = (pageNum - 1) * limitNum;
+      
+      const doctors = await Doctor.find(query)
+        .populate('user', 'name email profileImage phoneNumber')
+        .populate('hospitalAffiliations.hospital', 'name address')
+        .skip(skip)
+        .limit(limitNum)
+        .lean();
+      
+      const total = await Doctor.countDocuments(query);
+      
+      // Format response
+      res.json({
+        success: true,
+        data: doctors,
+        pagination: {
+          total,
+          page: pageNum,
+          limit: limitNum,
+          pages: Math.ceil(total / limitNum),
+          hasNext: pageNum * limitNum < total
+        }
+      });
+    } catch (error) {
+      console.error('Hospital doctors error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to find hospital doctors',
+        error: error.message
+      });
+    }
+  },
+
+  insertDummyData: async(req, res) => {
+    try {
+      const {user, doctor, hospital} = req.body;
+      const saveUser = await User.create(user);
+      const saveDoctor = await Doctor.create({...doctor, user: saveUser._id});
+      const saveHospital = await Hospital.create({...hospital, doctors: [saveDoctor._id]});
+      saveDoctor.address = hospital.address;
+      saveDoctor.hospitalAffiliations = [
+        {hospital: saveHospital._id,
+        department: "Cardiology",
+        position: "Senior Consultant"}
+      ]
+      await saveDoctor.save();
+
+      res.status(201).send({message: "Dummy data inserted", success: true});
+    } catch (error) {
+      console.log("Error in the insertDummyData, ", error);
+      res.status(500).send({error: "Internal server error...", success: false});
+    }
   }
+
+ 
 };
+
+
+
 
 module.exports = DoctorController;
