@@ -5,6 +5,7 @@ require("dotenv").config();
 const { google } = require('googleapis');
 const { startNotificationListener } = require("./controller/NotificationController");
 const { initAppointmentNotificationService } = require("./services/appointmentNotificationService");
+const { initNotificationMonitorService } = require("./services/notificationMonitorService");
 const Notification = require("./models/Notification");
 const meetingRoutes = require('./route/meetingRoutes');
 
@@ -57,7 +58,13 @@ app.use('/api/meetings', meetingRoutes);
 app.post("/notifications", async(req, res) => {
   try {
     const {user, message, referenceId, type} = req.body;
-    const notification = await Notification.create({user, message, referenceId, type});
+    const notification = await Notification.create({
+      user, 
+      message, 
+      referenceId, 
+      type,
+      status: "pending" 
+    });
     res.status(201).send({success: true, message: "Notification created.", notification});
   } catch (error) {
     console.log("Error in the create notification: ", error);
@@ -83,6 +90,7 @@ app.listen(PORT, async() => {
   
   // Start notification listeners and services
   startNotificationListener();
+  initNotificationMonitorService(); // Initialize the new notification monitor service
   initAppointmentNotificationService();
   
   console.log(`✅ All services initialized successfully!`);

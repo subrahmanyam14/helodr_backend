@@ -179,7 +179,7 @@ exports.login = async (req, res) => {
 // @access  Public
 exports.registerPatient = async (req, res) => {
   try {
-    const { fullName, mobileNumber, countryCode, password, role, promoConsent } = req.body;
+    const { fullName, mobileNumber, email, countryCode, password, role, promoConsent } = req.body;
 
     // Basic validation
     if (!fullName || !mobileNumber || !countryCode || !password) {
@@ -190,11 +190,11 @@ exports.registerPatient = async (req, res) => {
     }
 
     // Check if mobile number already exists
-    const existingUser = await User.findOne({ $and: [{ mobileNumber }, { countryCode }] });
+    const existingUser = await User.findOne({ $or: [{email: email}, {$and: [{ mobileNumber }, { countryCode }]}] });
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'Mobile number already registered'
+        message: 'Mobile number or email already registered'
       });
     }
 
@@ -204,6 +204,7 @@ exports.registerPatient = async (req, res) => {
       mobileNumber,
       countryCode,
       password,
+      email,
       ...(role ? { role } : {}),
       ...(promoConsent ? { promoConsent } : {}),
       isMobileVerified: false
@@ -250,6 +251,34 @@ exports.registerPatient = async (req, res) => {
       });
     }
 
+    const emailVerifyToken = jwt.sign(
+      { id: user._id, email, purpose: 'email_verification' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
+
+    // Send email verification request with error handling
+    try {
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendEmailVerification`, {
+        fullName: user.fullName,
+        email,
+        token: emailVerifyToken,
+        url: `${process.env.USER_MANAGEMENT_SERVICE_URL}/users/verify-email`
+      });
+
+      // Check if the email service returned success
+      if (response.status !== 200) {
+        throw new Error(response.data.message || 'Failed to send email verification');
+      }
+    } catch (apiError) {
+      console.error('Error sending email verification:', apiError.response?.data || apiError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send email verification. Please try again later.',
+        error: apiError.message || 'Unknown error'
+      });
+    }
+
     
 
     // Generate temporary token for verification step
@@ -285,7 +314,7 @@ exports.registerPatient = async (req, res) => {
 // @access  Public
 exports.verifyMobileOTP = async (req, res) => {
   try {
-    console.log(req.body);
+    // console.log(req.body);
     const { otp, verificationToken, mobileNumber } = req.body;
 
     // Validate input
@@ -406,6 +435,27 @@ exports.verifyMobileOTP = async (req, res) => {
     });
   }
 };
+
+exports.verifyEmail = async( req, res ) => {
+  try {
+    const {email, token} = req.body;
+    if(!email || !token)
+    {
+      return res.status(400).send({
+        success: false,
+        message: 'email or token missing'
+      });
+    }  
+
+  } catch (error) {
+    console.error('Email verification error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Verification failed',
+      error: error.message
+    });
+  }
+}
 
 
 exports.resendOTP = async (req, res) => {

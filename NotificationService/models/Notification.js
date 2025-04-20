@@ -17,6 +17,17 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
+    },
+    status: {
+        type: String,
+        enum: ["pending", "sent", "failed", "cancelled"],
+        default: "pending"
+    },
+    sentAt: {
+        type: Date
+    },
+    error: {
+        type: String
     }
 },
     {

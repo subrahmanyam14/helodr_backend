@@ -17,6 +17,17 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
+    },
+    status: {
+        type: String,
+        enum: ["pending", "sent", "failed", "cancelled"],
+        default: "pending"
+    },
+    sentAt: {
+        type: Date
+    },
+    error: {
+        type: String
     }
 },
     {
@@ -25,4 +36,4 @@ const notificationSchema = new mongoose.Schema({
 
 const Notification = mongoose.model("Notification", notificationSchema);
 
-module.exports = Notification;
+module.exports = Notification
