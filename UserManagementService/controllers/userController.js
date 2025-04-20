@@ -264,7 +264,7 @@ exports.registerPatient = async (req, res) => {
         fullName: user.fullName,
         email,
         token: emailVerifyToken,
-        url: `${process.env.FRONTEND_URL}/users/verify-email`
+        url: process.env.FRONTEND_URL
       });
 
       // Check if the email service returned success
