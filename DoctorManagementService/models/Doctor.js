@@ -1,241 +1,124 @@
 const mongoose = require('mongoose');
 
-const specializationMapping = {
-  "Internal Medicine": [
-    "Infectious Disease",
-    "Geriatric Medicine",
-    "Critical Care",
-    "Allergy & Immunology",
-    "Rheumatology",
-    "Sleep Medicine",
-    "General Medicine"
-  ],
-  "Pediatrics": [
-    "Neonatology",
-    "Pediatric Cardiology",
-    "Pediatric Critical Care",
-    "Pediatric Neurology",
-    "Pediatric Gastroenterology",
-    "Pediatric Oncology",
-    "Pediatric Endocrinology",
-    "Developmental Pediatrics",
-    "Adolescent Medicine"
-  ],
-  "Obstetrics & Gynecology": [
-    "Maternal-Fetal Medicine",
-    "Gynecologic Oncology",
-    "Reproductive Endocrinology",
-    "Urogynecology",
-    "High-Risk Pregnancy",
-    "Infertility",
-    "Menopause Management"
-  ],
-  "Surgery": [
-    "General Surgery",
-    "Cardiothoracic Surgery",
-    "Colorectal Surgery",
-    "Pediatric Surgery",
-    "Plastic Surgery",
-    "Vascular Surgery",
-    "Surgical Oncology",
-    "Trauma Surgery",
-    "Transplant Surgery",
-    "Bariatric Surgery"
-  ],
-  "Orthopedics": [
-    "Spine Surgery",
-    "Joint Replacement",
-    "Sports Medicine",
-    "Trauma Orthopedics",
-    "Pediatric Orthopedics",
-    "Hand Surgery",
-    "Foot & Ankle Surgery",
-    "Shoulder & Elbow Surgery",
-    "Arthroscopy"
-  ],
-  "Dermatology": [
-    "Cosmetic Dermatology",
-    "Pediatric Dermatology",
-    "Dermatopathology",
-    "Mohs Surgery",
-    "Hair Transplantation",
-    "Laser Treatment",
-    "Vitiligo Treatment",
-    "Psoriasis Treatment"
-  ],
-  "Ophthalmology": [
-    "Cataract Surgery",
-    "Glaucoma",
-    "Cornea & External Diseases",
-    "Retina & Vitreous",
-    "Pediatric Ophthalmology",
-    "Neuro-ophthalmology",
-    "Oculoplasty",
-    "LASIK & Refractive Surgery"
-  ],
-  "Psychiatry": [
-    "Child & Adolescent Psychiatry",
-    "Geriatric Psychiatry",
-    "Addiction Psychiatry",
-    "Consultation-Liaison Psychiatry",
-    "Forensic Psychiatry",
-    "Sleep Medicine",
-    "Neuropsychiatry"
-  ],
-  "Neurology": [
-    "Stroke",
-    "Epilepsy",
-    "Movement Disorders",
-    "Neuro-oncology",
-    "Neuromuscular Disorders",
-    "Multiple Sclerosis",
-    "Headache Medicine",
-    "Sleep Medicine"
-  ],
-  "Cardiology": [
-    "Interventional Cardiology",
-    "Electrophysiology",
-    "Heart Failure",
-    "Echocardiography",
-    "Nuclear Cardiology",
-    "Preventive Cardiology",
-    "Pediatric Cardiology",
-    "Cardiac Rehabilitation"
-  ],
-  "ENT": [
-    "Otology",
-    "Rhinology",
-    "Laryngology",
-    "Head & Neck Surgery",
-    "Facial Plastic Surgery",
-    "Pediatric ENT",
-    "Cochlear Implants",
-    "Sleep Medicine"
-  ],
-  "Urology": [
-    "Endourology",
-    "Pediatric Urology",
-    "Urologic Oncology",
-    "Female Urology",
-    "Andrology",
-    "Reconstructive Urology",
-    "Kidney Transplantation"
-  ],
-  "Gastroenterology": [
-    "Hepatology",
-    "Inflammatory Bowel Disease",
-    "Therapeutic Endoscopy",
-    "Pancreaticobiliary Diseases",
-    "Functional GI Disorders",
-    "GI Oncology",
-    "Nutrition Support"
-  ],
-  "Pulmonology": [
-    "Interventional Pulmonology",
-    "Pulmonary Hypertension",
-    "Lung Transplantation",
-    "Sleep Medicine",
-    "Critical Care",
-    "Allergy & Immunology",
-    "Tuberculosis & Chest Infections"
-  ],
-  "Endocrinology": [
-    "Diabetes Management",
-    "Thyroid Disorders",
-    "Reproductive Endocrinology",
-    "Pediatric Endocrinology",
-    "Metabolic Disorders",
-    "Osteoporosis",
-    "Obesity Management"
-  ],
-  "Nephrology": [
-    "Dialysis",
-    "Kidney Transplantation",
-    "Hypertension",
-    "Glomerular Diseases",
-    "Electrolyte Disorders",
-    "Critical Care Nephrology"
-  ],
-  "Oncology": [
-    "Medical Oncology",
-    "Radiation Oncology",
-    "Surgical Oncology",
-    "Hematologic Oncology",
-    "Pediatric Oncology",
-    "Gynecologic Oncology",
-    "Neuro-oncology",
-    "Breast Cancer",
-    "GI Cancer"
-  ],
-  "Radiology": [
-    "Diagnostic Radiology",
-    "Interventional Radiology",
-    "Neuroradiology",
-    "Pediatric Radiology",
-    "Musculoskeletal Radiology",
-    "Breast Imaging",
-    "Nuclear Medicine"
-  ],
-  "Anesthesiology": [
-    "Cardiac Anesthesia",
-    "Neuroanesthesia",
-    "Pediatric Anesthesia",
-    "Obstetric Anesthesia",
-    "Pain Medicine",
-    "Critical Care",
-    "Regional Anesthesia"
-  ],
-  "Dentistry": [
-    "Orthodontics",
-    "Endodontics",
-    "Periodontics",
-    "Prosthodontics",
-    "Oral Surgery",
-    "Pediatric Dentistry", 
-    "Cosmetic Dentistry",
-    "Implantology"
-  ],
-  "Ayurveda": [
-    "Panchakarma",
-    "Kayachikitsa",
-    "Shalya Tantra",
-    "Shalakya Tantra",
-    "Kaumarbhritya",
-    "Rasayana",
-    "Vajikarana"
-  ],
-  "Homeopathy": [
-    "Classical Homeopathy",
-    "Constitutional Homeopathy",
-    "Pediatric Homeopathy",
-    "Homeopathic Dermatology",
-    "Homeopathic Psychiatry"
-  ],
-  "Unani": [
-    "Ilaj-bit-Tadbeer",
-    "Moalejat",
-    "Jarahiyat",
-    "Ain-Uzn-Anf-Halaq"
-  ],
-  "Physiotherapy": [
-    "Orthopedic Physiotherapy", 
-    "Neurological Physiotherapy",
-    "Cardiorespiratory Physiotherapy",
-    "Sports Physiotherapy",
-    "Pediatric Physiotherapy",
-    "Geriatric Physiotherapy",
-    "Women's Health"
-  ],
-  "Nutrition & Dietetics": [
-    "Clinical Nutrition",
-    "Sports Nutrition",
-    "Pediatric Nutrition",
-    "Diabetes Management",
-    "Weight Management",
-    "Renal Nutrition",
-    "Oncology Nutrition"
-  ]
-};
+
+const specializationEnum = [
+  // Primary Care
+  "General Medicine",
+  "Family Medicine",
+  "Internal Medicine",
+  "Pediatrics",
+  "Geriatrics",
+  
+  // Surgical Specialties
+  "General Surgery",
+  "Orthopedics",
+  "Neurosurgery",
+  "Cardiothoracic Surgery",
+  "Vascular Surgery",
+  "Plastic Surgery",
+  "Pediatric Surgery",
+  "Urology",
+  "Surgical Gastroenterology",
+  "Surgical Oncology",
+  "Transplant Surgery",
+  "Laparoscopic Surgery",
+  "Bariatric Surgery",
+  "ENT (Otorhinolaryngology)",
+  
+  // Internal Medicine Subspecialties
+  "Cardiology",
+  "Pulmonology",
+  "Gastroenterology",
+  "Nephrology",
+  "Endocrinology",
+  "Rheumatology",
+  "Hematology",
+  "Oncology",
+  "Medical Oncology",
+  "Neurology",
+  "Infectious Disease",
+  "Diabetology",
+  "Hepatology",
+  
+  // Women's Health
+  "Obstetrics & Gynecology",
+  "Gynecology",
+  "Obstetrics",
+  "Reproductive Medicine",
+  "Gynecologic Oncology",
+  "Fetal Medicine",
+  
+  // Mental Health
+  "Psychiatry",
+  "Child Psychiatry",
+  "Addiction Medicine",
+  
+  // Eye & Vision
+  "Ophthalmology",
+  "Retina Specialist",
+  "Glaucoma Specialist",
+  "Cornea Specialist",
+  
+  // Dental
+  "Dentistry",
+  "Orthodontics",
+  "Periodontics",
+  "Endodontics",
+  "Prosthodontics",
+  "Oral and Maxillofacial Surgery",
+  "Pediatric Dentistry",
+  
+  // Skin
+  "Dermatology",
+  "Cosmetology",
+  "Trichology",
+  
+  // Diagnostic Specialties
+  "Radiology",
+  "Interventional Radiology",
+  "Pathology",
+  "Clinical Pathology",
+  "Anatomical Pathology",
+  "Nuclear Medicine",
+  
+  // Rehabilitation
+  "Physical Medicine and Rehabilitation",
+  "Physiotherapy",
+  "Occupational Therapy",
+  "Speech Therapy",
+  
+  // Alternative Medicine (Recognized in India)
+  "Ayurveda",
+  "Homeopathy",
+  "Unani",
+  "Siddha",
+  "Naturopathy",
+  "Yoga & Naturopathy",
+  
+  // Public Health
+  "Public Health",
+  "Community Medicine",
+  "Preventive Medicine",
+  "Epidemiology",
+  
+  // Other Specialties
+  "Anesthesiology",
+  "Critical Care Medicine",
+  "Emergency Medicine",
+  "Sports Medicine",
+  "Pain Management",
+  "Palliative Care",
+  "Sleep Medicine",
+  "Immunology",
+  "Allergy and Immunology",
+  "Aviation Medicine",
+  "Forensic Medicine",
+  "Nutrition",
+  "Neonatology",
+  "Clinical Genetics",
+  "Venereology",
+  "Transfusion Medicine"
+];
 
 const doctorSchema = new mongoose.Schema({
   // Basic Information
@@ -250,23 +133,11 @@ const doctorSchema = new mongoose.Schema({
     enum: ["Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", null],
     default: "Dr."
   },
-  specialization: {
+  specializations: [{
     type: String,
     required: [true, "Specialization is required"],
-    enum: Object.keys(specializationMapping),
+    enum: specializationEnum,
     index: true
-  },
-  subSpecializations: [{
-    type: String,
-    enum: [].concat(...Object.values(specializationMapping)),
-    index: true,
-    validate: {
-      validator: function(value) {
-        // Validate that subspecialization belongs to the doctor's specialization
-        return specializationMapping[this.specialization].includes(value);
-      },
-      message: props => `${props.value} is not a valid subspecialization for ${this.specialization}`
-    }
   }],
   registrationNumber: {
     type: String,
