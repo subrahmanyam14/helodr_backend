@@ -869,29 +869,29 @@ exports.sendEmailVerification = async (req, res) => {
 
 // @desc    Verify email
 // @access  Public
-exports.verifyEmail = async (req, res) => {
-  try {
-    const { token, email } = req.query;
+// exports.verifyEmail = async (req, res) => {
+//   try {
+//     const { token, email } = req.query;
 
-    if (!token || !email) {
-      return res.status(400).json({ message: 'Invalid request' });
-    }
+//     if (!token || !email) {
+//       return res.status(400).json({ message: 'Invalid request' });
+//     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (decoded.email !== email) {
-      return res.status(401).json({ message: 'Token does not match email' });
-    }
+//     if (decoded.email !== email) {
+//       return res.status(401).json({ message: 'Token does not match email' });
+//     }
 
-    // Update user status in the database
-    await User.updateOne({ email }, { isEmailVerified: true });
+//     // Update user status in the database
+//     await User.updateOne({ email }, { isEmailVerified: true });
 
-    res.status(200).send('<h1>Email Verified Successfully!</h1>');
-  } catch (error) {
-    console.error('Verification error:', error);
-    res.status(400).send('<h1>Invalid or Expired Token</h1>');
-  }
-};
+//     res.status(200).send('<h1>Email Verified Successfully!</h1>');
+//   } catch (error) {
+//     console.error('Verification error:', error);
+//     res.status(400).send('<h1>Invalid or Expired Token</h1>');
+//   }
+// };
 
 
 exports.updatePassword = async (req, res) => {
