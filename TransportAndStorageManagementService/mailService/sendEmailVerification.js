@@ -13,6 +13,7 @@ const transporter = nodemailer.createTransport({
 });
 
 const createHTML = (fullName, email, token, url) => {
+    const verificationUrl = `${url}/verify-email?email=${email}&token=${token}`;
     return `
     <!DOCTYPE html>
     <!DOCTYPE html>
@@ -90,7 +91,7 @@ const createHTML = (fullName, email, token, url) => {
                                     style="border-spacing: 0; border-collapse: collapse;">
                                     <tr>
                                         <td align="center">
-                                            <a href="{{verificationUrl}}"
+                                            <a href="${verificationUrl}"
                                                 style="display: inline-block; min-width: 200px; background-color: #009490; color: #ffffff; font-size: 16px; font-weight: 600; text-align: center; text-decoration: none; padding: 14px 24px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 148, 144, 0.25); transition: all 0.3s ease;">
                                                 Confirm Email
                                             </a>
@@ -109,7 +110,7 @@ const createHTML = (fullName, email, token, url) => {
                                             </p>
                                             <div
                                                 style="padding: 12px 15px; background-color: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 14px; color: #555555; word-break: break-all; text-align: center;">
-                                                {{verificationUrl}}
+                                                ${verificationUrl}
                                             </div>
                                         </td>
                                     </tr>

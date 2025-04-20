@@ -7,6 +7,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const validator = require('validator');
 const bcrypt = require('bcryptjs');
+const { default: isEmail } = require('validator/lib/isEmail');
 dotenv.config();
 
 const transportStorageServiceUrl = process.env.TRANSPORT_STORAGE_SERVICE_URL;
@@ -263,7 +264,7 @@ exports.registerPatient = async (req, res) => {
         fullName: user.fullName,
         email,
         token: emailVerifyToken,
-        url: `${process.env.USER_MANAGEMENT_SERVICE_URL}/users/verify-email`
+        url: `${process.env.FRONTEND_URL}/users/verify-email`
       });
 
       // Check if the email service returned success
@@ -438,14 +439,76 @@ exports.verifyMobileOTP = async (req, res) => {
 
 exports.verifyEmail = async( req, res ) => {
   try {
-    const {email, token} = req.body;
-    if(!email || !token)
+    const {email, verificationToken} = req.query;
+    if(!email || !verificationToken)
     {
       return res.status(400).send({
         success: false,
         message: 'email or token missing'
       });
     }  
+    // Verify the JWT token
+    let decoded;
+    try {
+      decoded = jwt.verify(verificationToken, process.env.JWT_SECRET);
+
+      // Check if token has valid purpose
+      if (!["email_verification"].includes(decoded.purpose)) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid token purpose'
+        });
+      }
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired verification token',
+        error: jwtError.message
+      });
+    }
+
+    // Find user
+    const user = await User.findOne({
+      _id: decoded.id,
+      email
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+     // Generate proper auth token 
+     const authToken = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+
+
+
+    // Prepare response data
+    const responseData = {
+      success: true,
+      message: 'Email verified successfully',
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        role: user.role,
+        mobileNumber: user.mobileNumber,
+        countryCode: user.countryCode,
+        isMobileVerified: user.isMobileVerified,
+        email: email,
+        isEmailVerified: user.isEmailVerified,
+        profilePhoto: user.profilePhoto
+      },
+      token: authToken
+    };
+
+    return res.status(200).json(responseData);
+
 
   } catch (error) {
     console.error('Email verification error:', error);
