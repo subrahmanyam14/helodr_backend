@@ -68,4 +68,143 @@ const startNotificationListener = () => {
     console.log("🔔 Notification service listening for new notifications...");
 };
 
-module.exports = { startNotificationListener };
+//get doctors messages
+const getDoctorMessages = async (req, res) => {
+  try {
+    // Use this line later when implementing authorization
+    // const doctorId = req.user?.doctorId;
+
+    // For now, accept doctorId from body for testing
+    const doctorId = req.body.doctorId;
+
+    if (!doctorId) {
+      return res.status(400).json({ success: false, message: "doctorId is required in request body" });
+    }
+
+    // Find all relevant appointments for this doctor
+    const appointments = await Appointment.find({ doctor: doctorId }).select("_id patient");
+
+    const appointmentIds = appointments.map(app => app._id.toString());
+    const patientMap = {};
+    appointments.forEach(app => {
+      patientMap[app._id.toString()] = app.patient.toString();
+    });
+
+    // Fetch all notifications related to those appointments
+    const notifications = await Notification.find({
+      referenceId: { $in: appointmentIds }
+    }).sort({ createdAt: -1 });
+
+    const threadsMap = {};
+
+    notifications.forEach(notification => {
+      const patientId = patientMap[notification.referenceId.toString()];
+      if (!patientId) return;
+
+      if (!threadsMap[patientId]) {
+        threadsMap[patientId] = {
+          id: patientId,
+          lastMessage: notification.message,
+          timestamp: notification.createdAt,
+          unreadCount: 1 // for now, every message is unread
+        };
+      } else {
+        threadsMap[patientId].unreadCount += 1;
+      }
+    });
+
+    // Fetch user details for all patients
+    const userIds = Object.keys(threadsMap);
+    const users = await User.find({ _id: { $in: userIds } });
+
+    const threads = users.map(user => {
+      const thread = threadsMap[user._id.toString()];
+      return {
+        id: thread.id,
+        participant: {
+          id: user._id,
+          name: user.name,
+          avatar: user.avatar || null,
+          status: user.status || "offline"
+        },
+        lastMessage: thread.lastMessage,
+        timestamp: thread.timestamp,
+        unreadCount: thread.unreadCount
+      };
+    });
+
+    res.json({ threads });
+
+  } catch (err) {
+    console.error("Error fetching doctor messages:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+//threaded message i.e messages between patient and doctor
+const getDoctorThreadMessages = async (req, res) => {
+  try {
+    const doctorId = req.body.doctorId; 
+    const patientId = req.params.threadId;
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    if (!doctorId || !patientId) {
+      return res.status(400).json({ success: false, message: "doctorId and threadId (patientId) are required" });
+    }
+
+    // Find all appointment IDs between this doctor and patient
+    const appointments = await Appointment.find({
+      doctor: doctorId,
+      patient: patientId
+    }).select("_id");
+
+    const appointmentIds = appointments.map(app => app._id);
+
+    if (appointmentIds.length === 0) {
+      return res.status(404).json({ success: false, message: "No appointments found between doctor and patient" });
+    }
+
+    // Find notifications related to these appointments, paginated
+    const notifications = await Notification.find({
+      referenceId: { $in: appointmentIds }
+    })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const messages = notifications.map(n => ({
+      id: n._id,
+      sender: n.user, // You can populate if needed
+      text: n.message,
+      timestamp: n.createdAt,
+      read: false // Add read tracking if implemented
+    }));
+
+    // Fetch participant (patient) info
+    const participant = await User.findById(patientId).select("_id name avatar status");
+
+    if (!participant) {
+      return res.status(404).json({ success: false, message: "Participant not found" });
+    }
+
+    res.status(200).json({
+      messages,
+      participant: {
+        id: participant._id,
+        name: participant.name,
+        avatar: participant.avatar || null,
+        status: participant.status || "offline"
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching thread messages:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
+module.exports = { startNotificationListener,getDoctorMessages ,getDoctorThreadMessages};

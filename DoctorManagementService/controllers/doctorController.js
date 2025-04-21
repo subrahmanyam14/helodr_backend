@@ -6,6 +6,7 @@ const Wallet = require('../models/Wallet');
 const Statistics = require('../models/Statistics');
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
 
 // Helper functions
 const createDefaultWallet = async (doctorId) => {
@@ -543,7 +544,7 @@ const DoctorController = {
   // Get doctor profile
   getDoctorProfile: async (req, res) => {
     try {
-      const { doctorId } = req.params;
+      const { doctorId } = req.query;
       
       const doctor = await Doctor.findById(doctorId)
         .populate('user', 'fullName email gender countryCode mobileNumber profilePhoto age')
@@ -885,10 +886,12 @@ const DoctorController = {
       console.log("Error in the insertDummyData, ", error);
       res.status(500).send({error: "Internal server error...", success: false});
     }
-  }
-
+  },
+  
+  
  
 };
+
 
 
 

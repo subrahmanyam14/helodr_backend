@@ -92,13 +92,13 @@ router.get(
 );
 
 // Get doctor's own profile
-router.get(
-  '/my-profile',
-  protect,
-  authorize('doctor'),
+router.get('/my-profile',
+  // protect,
+  // authorize('doctor'),
   
   DoctorController.getDoctorProfile
 );
+
 
 
 module.exports = router;
