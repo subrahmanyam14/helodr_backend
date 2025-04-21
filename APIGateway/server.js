@@ -15,7 +15,7 @@ const serviceEUrl = process.env.PAYMENT_MANAGEMENT_SERVICE_URL || 'http://localh
 const serviceFUrl = process.env.NOTIFICATION_MANAGEMENT_SERVICE_URL || 'http://localhost:5006';
 
 // Middlewares
-app.use(cors(["http://localhost:3000"])); // Allow cross-origin requests
+app.use(cors(["http://localhost:3000", "https://helodr-saisobila.vercel.app"])); // Allow cross-origin requests
 app.use(morgan('combined')); // Detailed request logging
 
 // Proxy error handler (global)
