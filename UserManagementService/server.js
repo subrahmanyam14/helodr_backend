@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require('cors');
 const dotenv  = require('dotenv');
 const userRouter = require("./routes/userRoutes");
+const adminroutes=require("./routes/adminRoutes")
 const connectDB = require("./config/db");
 
 dotenv.config();
@@ -23,6 +24,7 @@ app.use((err, req, res, next) => {
 
 
 app.use("/users", userRouter);
+app.use("/admin",adminroutes)
 
 
 app.listen(port, async () => {

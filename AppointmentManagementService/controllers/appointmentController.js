@@ -4,6 +4,7 @@ const Payment = require('../models/Payment');
 const Notification = require('../models/Notification');
 const Doctor = require('../models/Doctor'); // Added missing import
 const mongoose = require('mongoose');
+const User=require('../models/User')
 
 // @desc    Book an appointment
 // @route   POST /api/appointments
@@ -270,10 +271,13 @@ exports.updateAppointmentStatus = async (req, res) => {
 // @access  Private (Doctor)
 exports.addPrescription = async (req, res) => {
   try {
-    const { diagnosis, medicines, tests, advice, followUpDate } = req.body;
-
+    const { doctorId,diagnosis, medicines, tests, advice, followUpDate } = req.body;
+   
     const appointment = await Appointment.findOneAndUpdate(
-      { _id: req.params.id, doctor: req.user.doctorId },
+      { _id: req.params.id, 
+        // doctor: req.user.doctorId 
+        doctor:doctorId
+      },
       { 
         prescription: { diagnosis, medicines, tests, advice, followUpDate },
         status: 'completed' 
@@ -295,6 +299,7 @@ exports.addPrescription = async (req, res) => {
 
     res.status(200).json({ success: true, data: appointment });
   } catch (err) {
+    console.log(err.message)
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 };
@@ -369,5 +374,221 @@ exports.getCancelledAppointments = async (req, res) => {
     res.status(200).json(appointments);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch cancelled appointments' });
+  }
+};
+
+//getting the patients assigned to a doctor when doctor logged in
+exports.getDoctorPatients = async (req, res) => {
+  try {
+    const doctorId = req.body;
+    const { search = "", page = 1, limit = 10 } = req.query;
+
+    if (!doctorId) {
+      return res.status(400).json({
+        success: false,
+        message: "Doctor ID is required"
+      });
+    }
+
+    const query = {
+      doctor: doctorId,
+      status: { $in: ['booked', 'completed'] }
+    };
+
+    // Aggregate unique patient info from appointments
+    const aggregatePipeline = [
+      { $match: query },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'patient',
+          foreignField: '_id',
+          as: 'patientInfo'
+        }
+      },
+      { $unwind: '$patientInfo' },
+      {
+        $group: {
+          _id: '$patient',
+          name: { $first: '$patientInfo.name' },
+          email: { $first: '$patientInfo.email' },
+          age: { $first: '$patientInfo.age' },
+          gender: { $first: '$patientInfo.gender' },
+          lastVisit: { $max: '$date' },
+          condition: { $first: '$reason' }, // assuming 'reason' field represents condition
+          assignedDoctor: { $first: '$doctor' }
+        }
+      },
+      {
+        $match: {
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { email: { $regex: search, $options: 'i' } }
+          ]
+        }
+      },
+      {
+        $sort: { lastVisit: -1 }
+      },
+      {
+        $skip: (parseInt(page) - 1) * parseInt(limit)
+      },
+      {
+        $limit: parseInt(limit)
+      }
+    ];
+
+    const countPipeline = [
+      { $match: query },
+      {
+        $group: {
+          _id: '$patient'
+        }
+      },
+      {
+        $count: 'totalCount'
+      }
+    ];
+
+    const [patients, totalCountResult] = await Promise.all([
+      Appointment.aggregate(aggregatePipeline),
+      Appointment.aggregate(countPipeline)
+    ]);
+
+    const totalCount = totalCountResult[0]?.totalCount || 0;
+
+    res.json({
+      patients: patients.map(p => ({
+        id: p._id,
+        name: p.name,
+        email: p.email,
+        age: p.age,
+        gender: p.gender,
+        lastVisit: p.lastVisit,
+        condition: p.condition,
+        assignedDoctor: p.assignedDoctor
+      })),
+      totalCount,
+      page: parseInt(page)
+    });
+
+  } catch (error) {
+    console.error("Error fetching patients:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+exports.getDoctorPatientById = async (req, res) => {
+  try {
+    const doctorId = req.params.doctorId?.trim();
+    const patientId = req.params.id?.trim();
+
+    if (!doctorId) {
+      return res.status(400).json({ success: false, message: "Doctor ID missing" });
+    }
+
+    // Check if this doctor has had appointments with the patient
+    const hasAccess = await Appointment.exists({
+      doctor: doctorId,
+      patient: patientId,
+      status: { $in: ['booked', 'completed'] }
+    });
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this patient's details"
+      });
+    }
+
+    // Get patient profile
+    const patient = await User.findById(patientId).select(
+      'name email age gender address bloodGroup allergies medicalHistory emergencyContact'
+    );
+
+    if (!patient) {
+      return res.status(404).json({ success: false, message: "Patient not found" });
+    }
+
+    // Get past appointments
+    const pastAppointments = await Appointment.find({
+      doctor: doctorId,
+      patient: patientId,
+      status: { $in: ['completed', 'booked'] }
+    }).sort({ date: -1 }).select('date diagnosis prescription');
+
+    res.json({
+      patient: {
+        id: patient._id,
+        name: patient.name,
+        email: patient.email,
+        age: patient.age,
+        gender: patient.gender,
+        address: patient.address,
+        bloodGroup: patient.bloodGroup,
+        allergies: patient.allergies,
+        medicalHistory: patient.medicalHistory,
+        emergencyContact: patient.emergencyContact,
+        pastAppointments
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching patient details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+//doctor adding notes to patient throgh patient id
+exports.addPatientNotes = async (req, res) => {
+  try {
+    const doctorId = req.user?.doctorId;
+    const patientId = req.params.id;
+    const { notes, diagnosis, prescription, followUpDate } = req.body;
+
+    if (!doctorId) {
+      return res.status(401).json({ success: false, message: "Unauthorized access" });
+    }
+
+    // Find latest appointment between doctor and patient
+    const appointment = await Appointment.findOne({
+      doctor: doctorId,
+      patient: patientId,
+      status: { $in: ['booked', 'completed'] }
+    }).sort({ date: -1 });
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: "No recent appointment found for this patient"
+      });
+    }
+
+    // Update the appointment with notes
+    appointment.notes = notes || appointment.notes;
+    appointment.diagnosis = diagnosis || appointment.diagnosis;
+    appointment.prescription = prescription || appointment.prescription;
+    if (followUpDate) {
+      appointment.followUpDate = new Date(followUpDate);
+    }
+
+    await appointment.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Patient notes saved successfully"
+    });
+  } catch (error) {
+    console.error("Error saving notes:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
   }
 };
