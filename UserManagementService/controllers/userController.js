@@ -7,6 +7,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const validator = require('validator');
 const bcrypt = require('bcryptjs');
+const { default: isEmail } = require('validator/lib/isEmail');
 dotenv.config();
 
 const transportStorageServiceUrl = process.env.TRANSPORT_STORAGE_SERVICE_URL;
@@ -179,7 +180,7 @@ exports.login = async (req, res) => {
 // @access  Public
 exports.registerPatient = async (req, res) => {
   try {
-    const { fullName, mobileNumber, countryCode, password, role, promoConsent } = req.body;
+    const { fullName, mobileNumber, email, countryCode, password, role, promoConsent } = req.body;
 
     // Basic validation
     if (!fullName || !mobileNumber || !countryCode || !password) {
@@ -190,11 +191,11 @@ exports.registerPatient = async (req, res) => {
     }
 
     // Check if mobile number already exists
-    const existingUser = await User.findOne({ $and: [{ mobileNumber }, { countryCode }] });
+    const existingUser = await User.findOne({ $or: [{email: email}, {$and: [{ mobileNumber }, { countryCode }]}] });
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'Mobile number already registered'
+        message: 'Mobile number or email already registered'
       });
     }
 
@@ -204,6 +205,7 @@ exports.registerPatient = async (req, res) => {
       mobileNumber,
       countryCode,
       password,
+      email,
       ...(role ? { role } : {}),
       ...(promoConsent ? { promoConsent } : {}),
       isMobileVerified: false
@@ -250,6 +252,34 @@ exports.registerPatient = async (req, res) => {
       });
     }
 
+    const emailVerifyToken = jwt.sign(
+      { id: user._id, email, purpose: 'email_verification' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
+
+    // Send email verification request with error handling
+    try {
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendEmailVerification`, {
+        fullName: user.fullName,
+        email,
+        token: emailVerifyToken,
+        url: process.env.FRONTEND_URL
+      });
+
+      // Check if the email service returned success
+      if (response.status !== 200) {
+        throw new Error(response.data.message || 'Failed to send email verification');
+      }
+    } catch (apiError) {
+      console.error('Error sending email verification:', apiError.response?.data || apiError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send email verification. Please try again later.',
+        error: apiError.message || 'Unknown error'
+      });
+    }
+
     
 
     // Generate temporary token for verification step
@@ -285,7 +315,7 @@ exports.registerPatient = async (req, res) => {
 // @access  Public
 exports.verifyMobileOTP = async (req, res) => {
   try {
-    console.log(req.body);
+    // console.log(req.body);
     const { otp, verificationToken, mobileNumber } = req.body;
 
     // Validate input
@@ -406,6 +436,89 @@ exports.verifyMobileOTP = async (req, res) => {
     });
   }
 };
+
+exports.verifyEmail = async( req, res ) => {
+  try {
+    const {email, verificationToken} = req.query;
+    if(!email || !verificationToken)
+    {
+      return res.status(400).send({
+        success: false,
+        message: 'email or token missing'
+      });
+    }  
+    // Verify the JWT token
+    let decoded;
+    try {
+      decoded = jwt.verify(verificationToken, process.env.JWT_SECRET);
+
+      // Check if token has valid purpose
+      if (!["email_verification"].includes(decoded.purpose)) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid token purpose'
+        });
+      }
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired verification token',
+        error: jwtError.message
+      });
+    }
+
+    // Find user
+    const user = await User.findOne({
+      _id: decoded.id,
+      email
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+     // Generate proper auth token 
+     const authToken = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+
+
+
+    // Prepare response data
+    const responseData = {
+      success: true,
+      message: 'Email verified successfully',
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        role: user.role,
+        mobileNumber: user.mobileNumber,
+        countryCode: user.countryCode,
+        isMobileVerified: user.isMobileVerified,
+        email: email,
+        isEmailVerified: user.isEmailVerified,
+        profilePhoto: user.profilePhoto
+      },
+      token: authToken
+    };
+
+    return res.status(200).json(responseData);
+
+
+  } catch (error) {
+    console.error('Email verification error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Verification failed',
+      error: error.message
+    });
+  }
+}
 
 
 exports.resendOTP = async (req, res) => {
@@ -756,29 +869,29 @@ exports.sendEmailVerification = async (req, res) => {
 
 // @desc    Verify email
 // @access  Public
-exports.verifyEmail = async (req, res) => {
-  try {
-    const { token, email } = req.query;
+// exports.verifyEmail = async (req, res) => {
+//   try {
+//     const { token, email } = req.query;
 
-    if (!token || !email) {
-      return res.status(400).json({ message: 'Invalid request' });
-    }
+//     if (!token || !email) {
+//       return res.status(400).json({ message: 'Invalid request' });
+//     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-   
-    if (decoded.email !== email) {
-      return res.status(401).json({ message: 'Token does not match email' });
-    }
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Update user status in the database
-    await User.updateOne({ email }, { isEmailVerified: true });
+//     if (decoded.email !== email) {
+//       return res.status(401).json({ message: 'Token does not match email' });
+//     }
 
-    res.status(200).send('<h1>Email Verified Successfully!</h1>');
-  } catch (error) {
-    console.error('Verification error:', error);
-    res.status(400).send('<h1>Invalid or Expired Token</h1>');
-  }
-};
+//     // Update user status in the database
+//     await User.updateOne({ email }, { isEmailVerified: true });
+
+//     res.status(200).send('<h1>Email Verified Successfully!</h1>');
+//   } catch (error) {
+//     console.error('Verification error:', error);
+//     res.status(400).send('<h1>Invalid or Expired Token</h1>');
+//   }
+// };
 
 
 exports.updatePassword = async (req, res) => {

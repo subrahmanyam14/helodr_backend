@@ -93,10 +93,10 @@ const hospitalSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Virtuals
-hospitalSchema.virtual('profileUrl').get(function() {
-  return `/hospitals/${this._id}`;
-});
+// // Virtuals
+// hospitalSchema.virtual('profileUrl').get(function() {
+//   return `/hospitals/${this._id}`;
+// });
 
 // Methods
 hospitalSchema.methods.updateRating = async function(newRating) {

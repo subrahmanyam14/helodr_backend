@@ -4,6 +4,12 @@ const DoctorController = require('../controllers/doctorController');
 const { protect, authorize } = require('../middleware/auth');
 
 
+//get hospital names and ids
+router.get(
+  '/hospitals',
+  DoctorController.getAllHospitals
+);
+
 // Search doctors
 router.get('/search', DoctorController.searchDoctors);
 

@@ -1,5 +1,125 @@
 const mongoose = require('mongoose');
 
+
+const specializationEnum = [
+  // Primary Care
+  "General Medicine",
+  "Family Medicine",
+  "Internal Medicine",
+  "Pediatrics",
+  "Geriatrics",
+  
+  // Surgical Specialties
+  "General Surgery",
+  "Orthopedics",
+  "Neurosurgery",
+  "Cardiothoracic Surgery",
+  "Vascular Surgery",
+  "Plastic Surgery",
+  "Pediatric Surgery",
+  "Urology",
+  "Surgical Gastroenterology",
+  "Surgical Oncology",
+  "Transplant Surgery",
+  "Laparoscopic Surgery",
+  "Bariatric Surgery",
+  "ENT (Otorhinolaryngology)",
+  
+  // Internal Medicine Subspecialties
+  "Cardiology",
+  "Pulmonology",
+  "Gastroenterology",
+  "Nephrology",
+  "Endocrinology",
+  "Rheumatology",
+  "Hematology",
+  "Oncology",
+  "Medical Oncology",
+  "Neurology",
+  "Infectious Disease",
+  "Diabetology",
+  "Hepatology",
+  
+  // Women's Health
+  "Obstetrics & Gynecology",
+  "Gynecology",
+  "Obstetrics",
+  "Reproductive Medicine",
+  "Gynecologic Oncology",
+  "Fetal Medicine",
+  
+  // Mental Health
+  "Psychiatry",
+  "Child Psychiatry",
+  "Addiction Medicine",
+  
+  // Eye & Vision
+  "Ophthalmology",
+  "Retina Specialist",
+  "Glaucoma Specialist",
+  "Cornea Specialist",
+  
+  // Dental
+  "Dentistry",
+  "Orthodontics",
+  "Periodontics",
+  "Endodontics",
+  "Prosthodontics",
+  "Oral and Maxillofacial Surgery",
+  "Pediatric Dentistry",
+  
+  // Skin
+  "Dermatology",
+  "Cosmetology",
+  "Trichology",
+  
+  // Diagnostic Specialties
+  "Radiology",
+  "Interventional Radiology",
+  "Pathology",
+  "Clinical Pathology",
+  "Anatomical Pathology",
+  "Nuclear Medicine",
+  
+  // Rehabilitation
+  "Physical Medicine and Rehabilitation",
+  "Physiotherapy",
+  "Occupational Therapy",
+  "Speech Therapy",
+  
+  // Alternative Medicine (Recognized in India)
+  "Ayurveda",
+  "Homeopathy",
+  "Unani",
+  "Siddha",
+  "Naturopathy",
+  "Yoga & Naturopathy",
+  
+  // Public Health
+  "Public Health",
+  "Community Medicine",
+  "Preventive Medicine",
+  "Epidemiology",
+  
+  // Other Specialties
+  "Anesthesiology",
+  "Critical Care Medicine",
+  "Emergency Medicine",
+  "Sports Medicine",
+  "Pain Management",
+  "Palliative Care",
+  "Sleep Medicine",
+  "Immunology",
+  "Allergy and Immunology",
+  "Aviation Medicine",
+  "Forensic Medicine",
+  "Nutrition",
+  "Neonatology",
+  "Clinical Genetics",
+  "Venereology",
+  "Transfusion Medicine"
+];
+
 const doctorSchema = new mongoose.Schema({
   // Basic Information
   user: {
@@ -13,13 +133,10 @@ const doctorSchema = new mongoose.Schema({
     enum: ["Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", null],
     default: "Dr."
   },
-  specialization: {
+  specializations: [{
     type: String,
     required: [true, "Specialization is required"],
-    index: true
-  },
-  subSpecializations: [{
-    type: String,
+    enum: specializationEnum,
     index: true
   }],
   registrationNumber: {
