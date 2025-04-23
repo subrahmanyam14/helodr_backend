@@ -48,26 +48,20 @@ const doctorSchema = new mongoose.Schema({
 
   // Practice Information
   clinicConsultationFee: {
-    type: Number,
-    min: 0,
-    default: 0
-  },
-  followUpFee: {
-    type: Number,
-    min: 0
-  },
-  services: [String],
-
-  // Hospital Affiliations
-  hospitalAffiliations: [{
-    hospital: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Hospital"
+    isAvailable: {
+      type: Boolean,
+      default: false
     },
-    department: String,
-    position: String
-  }],
-
+    consultationFee: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    followUpFee: {
+      type: Number,
+      min: 0
+    },
+  },
   // Online Consultation
   onlineConsultation: {
     isAvailable: {
@@ -84,6 +78,18 @@ const doctorSchema = new mongoose.Schema({
       min: 0
     }
   },
+  services: [String],
+
+  // Hospital Affiliations
+  hospitalAffiliations: [{
+    hospital: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Hospital"
+    },
+    department: String,
+    position: String
+  }],
+
   address: {
     street: String,
     city: String,
@@ -110,7 +116,7 @@ const doctorSchema = new mongoose.Schema({
   },
 
   verifiedByAdmin: {
-    admin: 
+    admin:
     {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User"
@@ -120,7 +126,7 @@ const doctorSchema = new mongoose.Schema({
   },
 
   verifiedBySuperAdmin: {
-    superAdmin: 
+    superAdmin:
     {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User"

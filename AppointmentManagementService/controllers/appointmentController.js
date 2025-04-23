@@ -4,7 +4,8 @@ const Payment = require('../models/Payment');
 const Notification = require('../models/Notification');
 const Doctor = require('../models/Doctor'); // Added missing import
 const mongoose = require('mongoose');
-const User=require('../models/User')
+const User = require('../models/User');
+const Statistics = require("../models/Statistics");
 
 // @desc    Book an appointment
 // @route   POST /api/appointments
@@ -64,23 +65,25 @@ exports.bookAppointment = async (req, res) => {
       .select("user")
       .populate("user", "fullName")
       .session(session);
-    
+
     if (!doctor) {
       throw new Error("Doctor not found");
     }
 
     await session.commitTransaction();
+    const fee = await calculateAppointmentFee(doctorId, appointmentType);
 
     res.status(201).json({
       success: true,
-      data: appointment,
+      data: { ...appointment.toObject(), fee },
       message: "Appointment booked successfully"
     });
+
   } catch (err) {
     await session.abortTransaction();
-    res.status(400).json({ 
-      success: false, 
-      message: err.message || "Failed to book appointment" 
+    res.status(400).json({
+      success: false,
+      message: err.message || "Failed to book appointment"
     });
   } finally {
     session.endSession();
@@ -92,26 +95,17 @@ function calculateEndTime(startTime, durationMinutes) {
   const [hours, minutes] = startTime.split(':').map(Number);
   const startDate = new Date();
   startDate.setHours(hours, minutes, 0, 0);
-  
+
   const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
   return `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`;
 }
 
 
-// Helper function to calculate end time
-function calculateEndTime(startTime, duration) {
-  const [hours, minutes] = startTime.split(':').map(Number);
-  const startDate = new Date();
-  startDate.setHours(hours, minutes, 0, 0);
-  const endDate = new Date(startDate.getTime() + duration * 60000);
-  return `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`;
-}
-
 // Helper function to calculate appointment fee
 async function calculateAppointmentFee(doctorId, consultationType) {
   const doctor = await Doctor.findById(doctorId);
   if (!doctor) throw new Error('Doctor not found');
-  
+
   switch (consultationType) {
     case 'clinic':
       return doctor.clinicConsultationFee.consultationFee;
@@ -134,7 +128,7 @@ exports.getAppointments = async (req, res) => {
     // For patients
     if (req.user.role === 'patient') {
       query.patient = req.user.id;
-    } 
+    }
     // For doctors
     else if (req.user.role === 'doctor') {
       query.doctor = req.user.id;
@@ -166,8 +160,8 @@ exports.getAppointments = async (req, res) => {
 
     const total = await Appointment.countDocuments(query);
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       data: appointments,
       pagination: {
         total,
@@ -191,7 +185,7 @@ exports.getAppointment = async (req, res) => {
     // Patients can only see their own appointments
     if (req.user.role === 'patient') {
       query.patient = req.user.id;
-    } 
+    }
     // Doctors can only see their own appointments
     else if (req.user.role === 'doctor') {
       query.doctor = req.user.doctorId;
@@ -231,12 +225,12 @@ exports.updateAppointmentStatus = async (req, res) => {
     if (req.user.role === 'patient') {
       query.patient = req.user.id;
       if (status !== 'cancelled') {
-        return res.status(403).json({ 
-          success: false, 
-          message: 'Patients can only cancel appointments' 
+        return res.status(403).json({
+          success: false,
+          message: 'Patients can only cancel appointments'
         });
       }
-    } 
+    }
     // Doctors can update status
     else if (req.user.role === 'doctor') {
       query.doctor = req.user.doctorId;
@@ -254,7 +248,7 @@ exports.updateAppointmentStatus = async (req, res) => {
 
     // // Create notification
     await Notification.create({
-      user: appointment.patient ,
+      user: appointment.patient,
       type: 'appointment_status',
       message: `Appointment status updated to ${status}`,
       referenceId: appointment._id
@@ -271,16 +265,17 @@ exports.updateAppointmentStatus = async (req, res) => {
 // @access  Private (Doctor)
 exports.addPrescription = async (req, res) => {
   try {
-    const { doctorId,diagnosis, medicines, tests, advice, followUpDate } = req.body;
-   
+    const { doctorId, diagnosis, medicines, tests, advice, followUpDate } = req.body;
+
     const appointment = await Appointment.findOneAndUpdate(
-      { _id: req.params.id, 
+      {
+        _id: req.params.id,
         // doctor: req.user.doctorId 
-        doctor:doctorId
+        doctor: doctorId
       },
-      { 
+      {
         prescription: { diagnosis, medicines, tests, advice, followUpDate },
-        status: 'completed' 
+        status: 'completed'
       },
       { new: true }
     );
@@ -317,7 +312,7 @@ function calculateEndTime(startTime, duration) {
 async function calculateAppointmentFee(doctorId, consultationType) {
   const doctor = await Doctor.findById(doctorId);
   if (!doctor) throw new Error('Doctor not found');
-  
+
   switch (consultationType) {
     case 'clinic':
       return doctor.clinicConsultationFee;
@@ -552,9 +547,6 @@ exports.addPatientNotes = async (req, res) => {
     const patientId = req.params.id;
     const { notes, diagnosis, prescription, followUpDate } = req.body;
 
-    if (!doctorId) {
-      return res.status(401).json({ success: false, message: "Unauthorized access" });
-    }
 
     // Find latest appointment between doctor and patient
     const appointment = await Appointment.findOne({
@@ -592,3 +584,90 @@ exports.addPatientNotes = async (req, res) => {
     });
   }
 };
+
+exports.addReviewByPatient = async (req, res) => {
+  try {
+    const { appointmentId } = req.params;
+    const { rating, feedback, aspects, isAnonymous } = req.body;
+    const patientId = req.user.id; // Assuming user ID is stored in req.user
+
+    // Validate input
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid rating between 1 and 5"
+      });
+    }
+
+    // Find the appointment
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      patient: patientId,
+      status: "completed"
+    });
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found or not eligible for review"
+      });
+    }
+
+    // Check if review already exists
+    if (appointment.review) {
+      return res.status(400).json({
+        success: false,
+        message: "Review already submitted for this appointment"
+      });
+    }
+
+    // Add the review
+    appointment.review = {
+      rating,
+      feedback,
+      aspects,
+      isAnonymous,
+      createdAt: new Date()
+    };
+
+    await appointment.save();
+
+    // Update doctor's statistics
+    let stats = await Statistics.findOne({ doctor: appointment.doctor });
+
+    if (!stats) {
+      // If no stats exist yet, create new
+      stats = new Statistics({
+        doctor: appointment.doctor,
+        average_rating: rating,
+        total_ratings: 1,
+        appointment_count: 1,
+        total_earnings: 0 // You can calculate this based on appointments if needed
+      });
+    } else {
+      const totalRatings = stats.total_ratings || 0;
+      const currentTotal = (stats.average_rating || 0) * totalRatings;
+      const newTotalRatings = totalRatings + 1;
+      const newAverage = (currentTotal + rating) / newTotalRatings;
+
+      stats.average_rating = newAverage;
+      stats.total_ratings = newTotalRatings;
+    }
+
+    await stats.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Review submitted successfully",
+      data: appointment.review
+    });
+
+  } catch (error) {
+    console.error("Error in addReviewByPatient:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
