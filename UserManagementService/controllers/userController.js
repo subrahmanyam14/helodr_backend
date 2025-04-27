@@ -818,7 +818,7 @@ exports.sendEmailVerification = async (req, res) => {
         message: 'User not found'
       });
     }
-
+      console.log(user)
     // Generate email verification token
     const token = jwt.sign(
       { id: user._id, email, purpose: 'email_verification' },
@@ -828,7 +828,7 @@ exports.sendEmailVerification = async (req, res) => {
 
     // Send email verification request with error handling
     try {
-      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendEmailVerification`, {
+      const response = await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/mail/sendEmailVerification`, {
         fullName: user.fullName,
         email,
         token,
@@ -980,10 +980,10 @@ exports.forgotPassword = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '1d' }
     );
-
+    // console.log(forgotPasswordVerifyToken) 
      // Send OTP via API request with error handling
      try {
-      const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
+      const response = await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendOTP`, {
         to: `${user.countryCode}${mobileNumber}`,
         otp
       });
@@ -1023,7 +1023,7 @@ exports.forgotPassword = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
-
+console.log(token,newPassword)
     if (!token || !newPassword) {
       return res.status(400).json({
         success: false,

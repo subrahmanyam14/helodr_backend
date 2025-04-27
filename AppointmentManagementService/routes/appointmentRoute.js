@@ -16,7 +16,10 @@ appointmentRouter.get('/:id', protect, appointmentController.getAppointment);
 appointmentRouter.put('/:id/status', protect, appointmentController.updateAppointmentStatus);
 
 // Add prescription to appointment
-appointmentRouter.put('/:id/prescription', protect, authorize("doctor"), appointmentController.addPrescription);
+appointmentRouter.put('/:id/prescription',
+    //  protect, 
+    //  authorize("doctor"),
+      appointmentController.addPrescription);
 
 // Get upcoming video appointments
 appointmentRouter.get('/doctor/:doctorId/upcoming/video', appointmentController.getUpcomingVideoAppointments);
@@ -26,5 +29,15 @@ appointmentRouter.get('/doctor/:doctorId/upcoming/clinic', appointmentController
 
 // Get cancelled appointments
 appointmentRouter.get('/doctor/:doctorId/cancelled', appointmentController.getCancelledAppointments);
+
+
+// get patients assigned to a doctor
+appointmentRouter.get('/doctors/patients',appointmentController.getDoctorPatients)
+
+//doctor get particular patient's details by his id 
+appointmentRouter.get( '/doctors/:doctorId/patients/:id',appointmentController.getDoctorPatientById)
+
+//post notes to patient by doctor to patient
+appointmentRouter.post('/patients/:id/notes',appointmentController.addPatientNotes)
 
 module.exports = appointmentRouter;

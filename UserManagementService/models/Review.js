@@ -17,6 +17,10 @@ const reviewSchema = new mongoose.Schema({
     ref: "Doctor",
     required: true
   },
+  // hospital: {
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: "Hospital"
+  // },
   rating: {
     type: Number,
     required: true,
