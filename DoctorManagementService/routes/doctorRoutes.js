@@ -24,6 +24,8 @@ router.get('/hospital/:hospitalId', DoctorController.findDoctorsByHospital);
 
 router.post("/dummy", DoctorController.insertDummyData);
 
+router.get("/cities", DoctorController.getAllCities);
+
 // Doctor registration routes
 router.post(
   '/register',
