@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const User = require('./User'); 
 
 
 const specializationEnum = [
@@ -128,6 +129,9 @@ const doctorSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  fullName: {
+    type: String
+  },
   title: {
     type: String,
     enum: ["Dr.", "Prof.", "Mr.", "Mrs.", "Ms.", null],
@@ -256,6 +260,20 @@ const doctorSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   }
+});
+
+doctorSchema.pre('save', async function (next) {
+  if (this.isNew || this.isModified('user')) {
+    try {
+      const user = await mongoose.model('User').findById(this.user);
+      if (user) {
+        this.fullName = user.fullName; 
+      }
+    } catch (err) {
+      return next(err);
+    }
+  }
+  next();
 });
 
 const Doctor = mongoose.model("Doctor", doctorSchema);
