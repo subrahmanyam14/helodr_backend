@@ -864,12 +864,7 @@ const DoctorController = {
       });
     }
   },
-
-  /**
-   * @route GET /api/doctors/nearby
-   * @desc Find nearby doctors using geospatial query
-   * @access Public
-   */
+  
   findNearbyDoctors: async (req, res) => {
     try {
       const {
@@ -961,11 +956,6 @@ const DoctorController = {
     }
   },
 
-  /**
-   * @route GET /api/doctors/hospital/:hospitalId
-   * @desc Find doctors by hospital affiliation
-   * @access Public
-   */
   findDoctorsByHospital: async (req, res) => {
     try {
       const { hospitalId } = req.params;
@@ -1070,7 +1060,24 @@ const DoctorController = {
       console.log("Error in the getAllHospitals, ", error);
       res.status(500).send({ error: "Internal server error...", success: false });
     }
+  },
+
+  getAllCities: async (req, res) => {
+    try {
+      const cities = await Hospital.distinct("address.city");
+      res.status(200).send({
+        success: true,
+        data: cities
+      });
+    } catch (error) {
+      console.error("Error in getAllCities:", error);
+      res.status(500).send({
+        error: "Internal server error",
+        success: false
+      });
+    }
   }
+  
 
 };
 
