@@ -15,7 +15,7 @@ const specializationEnum = [
   "Internal Medicine",
   "Pediatrics",
   "Geriatrics",
-  
+
   // Surgical Specialties
   "General Surgery",
   "Orthopedics",
@@ -31,7 +31,7 @@ const specializationEnum = [
   "Laparoscopic Surgery",
   "Bariatric Surgery",
   "ENT (Otorhinolaryngology)",
-  
+
   // Internal Medicine Subspecialties
   "Cardiology",
   "Pulmonology",
@@ -46,7 +46,7 @@ const specializationEnum = [
   "Infectious Disease",
   "Diabetology",
   "Hepatology",
-  
+
   // Women's Health
   "Obstetrics & Gynecology",
   "Gynecology",
@@ -54,18 +54,18 @@ const specializationEnum = [
   "Reproductive Medicine",
   "Gynecologic Oncology",
   "Fetal Medicine",
-  
+
   // Mental Health
   "Psychiatry",
   "Child Psychiatry",
   "Addiction Medicine",
-  
+
   // Eye & Vision
   "Ophthalmology",
   "Retina Specialist",
   "Glaucoma Specialist",
   "Cornea Specialist",
-  
+
   // Dental
   "Dentistry",
   "Orthodontics",
@@ -74,12 +74,12 @@ const specializationEnum = [
   "Prosthodontics",
   "Oral and Maxillofacial Surgery",
   "Pediatric Dentistry",
-  
+
   // Skin
   "Dermatology",
   "Cosmetology",
   "Trichology",
-  
+
   // Diagnostic Specialties
   "Radiology",
   "Interventional Radiology",
@@ -87,13 +87,13 @@ const specializationEnum = [
   "Clinical Pathology",
   "Anatomical Pathology",
   "Nuclear Medicine",
-  
+
   // Rehabilitation
   "Physical Medicine and Rehabilitation",
   "Physiotherapy",
   "Occupational Therapy",
   "Speech Therapy",
-  
+
   // Alternative Medicine (Recognized in India)
   "Ayurveda",
   "Homeopathy",
@@ -101,13 +101,13 @@ const specializationEnum = [
   "Siddha",
   "Naturopathy",
   "Yoga & Naturopathy",
-  
+
   // Public Health
   "Public Health",
   "Community Medicine",
   "Preventive Medicine",
   "Epidemiology",
-  
+
   // Other Specialties
   "Anesthesiology",
   "Critical Care Medicine",
@@ -697,7 +697,7 @@ const DoctorController = {
     try {
       // Extract specializations array from request body 
       const { specializations } = req.body;
-  
+
       // Validate specializations input
       if (!specializations || !Array.isArray(specializations) || specializations.length === 0) {
         return res.status(400).json({
@@ -705,7 +705,7 @@ const DoctorController = {
           message: 'Please provide at least one specialization in the specializations array'
         });
       }
-  
+
       // Validate that specializations are from the allowed enum
       const invalidSpecializations = specializations.filter(spec => !specializationEnum.includes(spec));
       if (invalidSpecializations.length > 0) {
@@ -715,47 +715,54 @@ const DoctorController = {
           validSpecializations: specializationEnum
         });
       }
-  
+
       // Build base query for active doctors
       const query = {
         isActive: true,
         'verification.status': 'verified'
       };
-  
+
       // Filter by specializations - doctors who have ANY of the specializations in the array
       query.specializations = { $in: specializations };
-  
-      // Execute query without pagination
+
+      // Execute query with population of hospital affiliations
       const doctors = await Doctor.find(query)
         .populate('user', 'fullName profilePhoto _id')
         .populate({
           path: 'hospitalAffiliations.hospital',
-          select: 'name address',
-          match: { isActive: true } // Only include active hospitals
+          model: 'Hospital',
+          select: 'name type address contact services specialties featuredImage'
         })
         .sort({ experience: -1 })
         .lean();
-  
-      // Filter out any null hospital affiliations
-      const filteredDoctors = doctors.map(doctor => {
-        if (doctor.hospitalAffiliations) {
-          doctor.hospitalAffiliations = doctor.hospitalAffiliations.filter(
-            aff => aff.hospital !== null
-          );
-        }
-        return doctor;
-      });
-  
+
       // Get total count
       const total = doctors.length;
-  
-      // Return formatted response without pagination details
+
+      // Format the response data with hospital details
+      const formattedDoctors = doctors.map(doctor => {
+        // Format hospital affiliations with meaningful details
+        const hospitalDetails = doctor.hospitalAffiliations.map(affiliation => {
+          return {
+            hospitalInfo: affiliation.hospital,
+            department: affiliation.department,
+            position: affiliation.position
+          };
+        });
+
+        return {
+          ...doctor,
+          hospitalAffiliations: hospitalDetails
+        };
+      });
+
+      // Return formatted response with hospital details
       res.json({
         success: true,
-        data: filteredDoctors,
+        data: formattedDoctors,
         total
       });
-  
+
     } catch (error) {
       console.error('Get doctors by specializations error:', error);
       res.status(500).json({

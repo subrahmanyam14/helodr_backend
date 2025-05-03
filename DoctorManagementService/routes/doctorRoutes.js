@@ -14,7 +14,7 @@ router.get(
 router.get('/search', DoctorController.searchDoctors);
 
 // Get doctor by specializations
-router.get('/bySpecializations', DoctorController.getDoctorsBySpecializations);
+router.post('/bySpecializations', DoctorController.getDoctorsBySpecializations);
 
 // Find nearby doctors
 router.get('/nearby', DoctorController.findNearbyDoctors);
