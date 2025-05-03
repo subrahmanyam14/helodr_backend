@@ -8,6 +8,125 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 
+const specializationEnum = [
+  // Primary Care
+  "General Medicine",
+  "Family Medicine",
+  "Internal Medicine",
+  "Pediatrics",
+  "Geriatrics",
+  
+  // Surgical Specialties
+  "General Surgery",
+  "Orthopedics",
+  "Neurosurgery",
+  "Cardiothoracic Surgery",
+  "Vascular Surgery",
+  "Plastic Surgery",
+  "Pediatric Surgery",
+  "Urology",
+  "Surgical Gastroenterology",
+  "Surgical Oncology",
+  "Transplant Surgery",
+  "Laparoscopic Surgery",
+  "Bariatric Surgery",
+  "ENT (Otorhinolaryngology)",
+  
+  // Internal Medicine Subspecialties
+  "Cardiology",
+  "Pulmonology",
+  "Gastroenterology",
+  "Nephrology",
+  "Endocrinology",
+  "Rheumatology",
+  "Hematology",
+  "Oncology",
+  "Medical Oncology",
+  "Neurology",
+  "Infectious Disease",
+  "Diabetology",
+  "Hepatology",
+  
+  // Women's Health
+  "Obstetrics & Gynecology",
+  "Gynecology",
+  "Obstetrics",
+  "Reproductive Medicine",
+  "Gynecologic Oncology",
+  "Fetal Medicine",
+  
+  // Mental Health
+  "Psychiatry",
+  "Child Psychiatry",
+  "Addiction Medicine",
+  
+  // Eye & Vision
+  "Ophthalmology",
+  "Retina Specialist",
+  "Glaucoma Specialist",
+  "Cornea Specialist",
+  
+  // Dental
+  "Dentistry",
+  "Orthodontics",
+  "Periodontics",
+  "Endodontics",
+  "Prosthodontics",
+  "Oral and Maxillofacial Surgery",
+  "Pediatric Dentistry",
+  
+  // Skin
+  "Dermatology",
+  "Cosmetology",
+  "Trichology",
+  
+  // Diagnostic Specialties
+  "Radiology",
+  "Interventional Radiology",
+  "Pathology",
+  "Clinical Pathology",
+  "Anatomical Pathology",
+  "Nuclear Medicine",
+  
+  // Rehabilitation
+  "Physical Medicine and Rehabilitation",
+  "Physiotherapy",
+  "Occupational Therapy",
+  "Speech Therapy",
+  
+  // Alternative Medicine (Recognized in India)
+  "Ayurveda",
+  "Homeopathy",
+  "Unani",
+  "Siddha",
+  "Naturopathy",
+  "Yoga & Naturopathy",
+  
+  // Public Health
+  "Public Health",
+  "Community Medicine",
+  "Preventive Medicine",
+  "Epidemiology",
+  
+  // Other Specialties
+  "Anesthesiology",
+  "Critical Care Medicine",
+  "Emergency Medicine",
+  "Sports Medicine",
+  "Pain Management",
+  "Palliative Care",
+  "Sleep Medicine",
+  "Immunology",
+  "Allergy and Immunology",
+  "Aviation Medicine",
+  "Forensic Medicine",
+  "Nutrition",
+  "Neonatology",
+  "Clinical Genetics",
+  "Venereology",
+  "Transfusion Medicine"
+];
+
 // Helper functions
 const createDefaultWallet = async (doctorId) => {
   try {
@@ -21,9 +140,9 @@ const createDefaultWallet = async (doctorId) => {
       last_payment_date: null,
       last_withdrawal_date: null
     });
-    
+
     await newWallet.save();
-    
+
     // Also create default statistics
     const newStatistics = new Statistics({
       doctor: doctorId,
@@ -32,9 +151,9 @@ const createDefaultWallet = async (doctorId) => {
       appointment_count: 0,
       total_earnings: 0
     });
-    
+
     await newStatistics.save();
-    
+
     return { wallet: newWallet, statistics: newStatistics };
   } catch (error) {
     throw new Error(`Error creating wallet: ${error.message}`);
@@ -44,19 +163,19 @@ const createDefaultWallet = async (doctorId) => {
 const calculateDistance = (coords1, coords2) => {
   const [lon1, lat1] = coords1;
   const [lon2, lat2] = coords2;
-  
+
   const R = 6371; // Radius of the Earth in km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c; // Distance in km
-  
+
   return distance;
 };
 
@@ -71,12 +190,11 @@ const DoctorController = {
   registerDoctor: async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
-    
+
     try {
       const {
         title,
-        specialization,
-        subSpecializations,
+        specializations,
         registrationNumber,
         qualifications,
         experience,
@@ -87,7 +205,7 @@ const DoctorController = {
         services,
         onlineConsultation
       } = req.body;
-      
+
       // Check if doctor already exists with this user ID
       const existingDoctor = await Doctor.findOne({ user: req.user.id });
       if (existingDoctor) {
@@ -95,13 +213,12 @@ const DoctorController = {
         session.endSession();
         return res.status(400).json({ success: false, message: 'Doctor profile already exists for this user' });
       }
-      
+
       // Create new doctor
       const newDoctor = new Doctor({
         user: req.user.id,
         title: title || 'Dr.',
-        specialization,
-        subSpecializations: subSpecializations || [],
+        specializations: specializations || [], // Changed to array of specializations
         registrationNumber,
         qualifications: qualifications || [],
         experience: experience || 0,
@@ -118,9 +235,9 @@ const DoctorController = {
         },
         isActive: false
       });
-      
+
       await newDoctor.save({ session });
-      
+
       // Create default settings for the doctor
       const newSettings = new Settings({
         user: req.user.id,
@@ -131,12 +248,12 @@ const DoctorController = {
         auto_withdraw_threshold: 5000,
         payment_method: 'bank_transfer'
       });
-      
+
       await newSettings.save({ session });
-      
+
       await session.commitTransaction();
       session.endSession();
-      
+
       res.status(201).json({
         success: true,
         message: 'Doctor registered successfully',
@@ -154,37 +271,36 @@ const DoctorController = {
       });
     }
   },
-  
 
   // Ad d or update hospital affiliations
   addHospitalAffiliation: async (req, res) => {
     try {
       const { doctorId } = req.params;
       const { hospitalId, department, position } = req.body;
-      
+
       // Check if doctor exists
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
-      
+
       // Check if hospital exists
       const hospital = await Hospital.findById(hospitalId);
       if (!hospital) {
         return res.status(404).json({ success: false, message: 'Hospital not found' });
       }
-      
+
       // Add doctor to hospital's doctors array if not already added
       if (!hospital.doctors.includes(doctorId)) {
         hospital.doctors.push(doctorId);
         await hospital.save();
       }
-      
+
       // Check if doctor is already affiliated with this hospital
       const existingAffiliation = doctor.hospitalAffiliations.find(
         affiliation => affiliation.hospital.toString() === hospitalId
       );
-      
+
       if (existingAffiliation) {
         // Update existing affiliation
         existingAffiliation.department = department;
@@ -197,9 +313,9 @@ const DoctorController = {
           position
         });
       }
-      
+
       await doctor.save();
-      
+
       res.status(200).json({
         success: true,
         message: 'Hospital affiliation added/updated successfully',
@@ -213,7 +329,7 @@ const DoctorController = {
       });
     }
   },
-  
+
   // Register a new hospital
   registerHospital: async (req, res) => {
     try {
@@ -229,14 +345,14 @@ const DoctorController = {
         featuredImage,
         photos
       } = req.body;
-      
+
       // Check if hospital already exists with this name and address
       const existingHospital = await Hospital.findOne({
         name,
         'address.city': address.city,
         'address.street': address.street
       });
-      
+
       if (existingHospital) {
         return res.status(400).json({
           success: false,
@@ -244,7 +360,7 @@ const DoctorController = {
           hospital: existingHospital
         });
       }
-      
+
       // Create new hospital
       const newHospital = new Hospital({
         name,
@@ -278,9 +394,9 @@ const DoctorController = {
         photos: photos || [],
         addedBy: req.user.id
       });
-      
+
       await newHospital.save();
-      await Doctor.findOneAndUpdate({user: req.user.id}, {
+      await Doctor.findOneAndUpdate({ user: req.user.id }, {
         address: {
           street: address.street,
           city: address.city,
@@ -290,7 +406,7 @@ const DoctorController = {
           coordinates: address.coordinates || undefined
         },
       })
-      
+
       res.status(201).json({
         success: true,
         message: 'Hospital registered successfully',
@@ -305,7 +421,7 @@ const DoctorController = {
       });
     }
   },
-  
+
   // Add bank details for a doctor
   addBankDetails: async (req, res) => {
     try {
@@ -317,16 +433,16 @@ const DoctorController = {
         IFSC_code,
         UPI_id
       } = req.body;
-      
+
       // Check if doctor exists
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
-      
+
       // Check if bank details already exist for this doctor
       let bankDetails = await BankDetails.findOne({ doctor: doctorId });
-      
+
       if (bankDetails) {
         // Update existing bank details
         bankDetails.account_num = account_num;
@@ -347,9 +463,9 @@ const DoctorController = {
           is_verified: false
         });
       }
-      
+
       await bankDetails.save();
-      
+
       res.status(200).json({
         success: true,
         message: 'Bank details added/updated successfully',
@@ -363,7 +479,7 @@ const DoctorController = {
       });
     }
   },
-  
+
   // Update doctor settings
   updateSettings: async (req, res) => {
     try {
@@ -376,10 +492,10 @@ const DoctorController = {
         auto_withdraw_threshold,
         payment_method
       } = req.body;
-      
+
       // Find settings or create if not exists
       let settings = await Settings.findOne({ user_id: userId });
-      
+
       if (!settings) {
         settings = new Settings({
           user_id: userId,
@@ -391,7 +507,7 @@ const DoctorController = {
           payment_method: 'bank_transfer'
         });
       }
-      
+
       // Update settings
       if (email_notifications !== undefined) settings.email_notifications = email_notifications;
       if (sms_notifications !== undefined) settings.sms_notifications = sms_notifications;
@@ -399,9 +515,9 @@ const DoctorController = {
       if (auto_withdraw !== undefined) settings.auto_withdraw = auto_withdraw;
       if (auto_withdraw_threshold !== undefined) settings.auto_withdraw_threshold = auto_withdraw_threshold;
       if (payment_method !== undefined) settings.payment_method = payment_method;
-      
+
       await settings.save();
-      
+
       res.status(200).json({
         success: true,
         message: 'Settings updated successfully',
@@ -415,13 +531,13 @@ const DoctorController = {
       });
     }
   },
-  
+
   // Admin approval for doctor
   adminApproval: async (req, res) => {
     try {
       const { doctorId } = req.params;
       const { status, comments } = req.body;
-      
+
       // Validate status
       if (status !== 'verified' && status !== 'rejected') {
         return res.status(400).json({
@@ -429,26 +545,26 @@ const DoctorController = {
           message: 'Invalid status. Status must be either "verified" or "rejected"'
         });
       }
-      
+
       // Check if doctor exists
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
-      
+
       // Update verification status
       doctor.verification.status = status;
       doctor.verification.verifiedAt = status === 'verified' ? new Date() : null;
-      
+
       // Add admin verification
       doctor.verifiedByAdmin = {
         admin: req.user.id,
         verifiedAt: status === 'verified' ? new Date() : null,
         comments: comments || ''
       };
-      
+
       await doctor.save();
-      
+
       res.status(200).json({
         success: true,
         message: `Doctor ${status === 'verified' ? 'approved' : 'rejected'} by admin`,
@@ -462,16 +578,16 @@ const DoctorController = {
       });
     }
   },
-  
+
   // Super Admin approval for doctor
   superAdminApproval: async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
-    
+
     try {
       const { doctorId } = req.params;
       const { status, comments } = req.body;
-      
+
       // Validate status
       if (status !== 'verified' && status !== 'rejected') {
         await session.abortTransaction();
@@ -481,7 +597,7 @@ const DoctorController = {
           message: 'Invalid status. Status must be either "verified" or "rejected"'
         });
       }
-      
+
       // Check if doctor exists
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
@@ -489,7 +605,7 @@ const DoctorController = {
         session.endSession();
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
-      
+
       // Check if admin has already verified
       if (!doctor.verifiedByAdmin || !doctor.verifiedByAdmin.admin) {
         await session.abortTransaction();
@@ -499,31 +615,31 @@ const DoctorController = {
           message: 'Doctor must be verified by admin first'
         });
       }
-      
+
       // Update verification status
       doctor.verification.status = status;
       doctor.verification.verifiedAt = status === 'verified' ? new Date() : null;
-      
+
       // Add super admin verification
       doctor.verifiedBySuperAdmin = {
         superAdmin: req.user.id,
         verifiedAt: status === 'verified' ? new Date() : null,
         comments: comments || ''
       };
-      
+
       // Set doctor as active if verified
       doctor.isActive = status === 'verified';
-      
+
       await doctor.save({ session });
-      
+
       // If doctor is verified, create wallet and statistics
       if (status === 'verified') {
         await createDefaultWallet(doctorId);
       }
-      
+
       await session.commitTransaction();
       session.endSession();
-      
+
       res.status(200).json({
         success: true,
         message: `Doctor ${status === 'verified' ? 'approved' : 'rejected'} by super admin`,
@@ -532,7 +648,7 @@ const DoctorController = {
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
-      
+
       res.status(500).json({
         success: false,
         message: 'Error in super admin approval process',
@@ -540,27 +656,27 @@ const DoctorController = {
       });
     }
   },
-  
+
   // Get doctor profile
   getDoctorProfile: async (req, res) => {
     try {
       const { doctorId } = req.query;
-      
+
       const doctor = await Doctor.findById(doctorId)
         .populate('user', 'fullName email gender countryCode mobileNumber profilePhoto age')
         .populate('hospitalAffiliations.hospital', 'name address contact');
-      
+
       if (!doctor) {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
-      
+
       // Get associated wallet, bank details, and statistics
       const [wallet, bankDetails, statistics] = await Promise.all([
         Wallet.findOne({ doctor: doctorId }),
         BankDetails.findOne({ doctor: doctorId }),
         Statistics.findOne({ doctor: doctorId })
       ]);
-      
+
       res.status(200).json({
         success: true,
         doctor,
@@ -576,16 +692,89 @@ const DoctorController = {
       });
     }
   },
+
+  getDoctorsBySpecializations: async (req, res) => {
+    try {
+      // Extract specializations array from request body 
+      const { specializations } = req.body;
+  
+      // Validate specializations input
+      if (!specializations || !Array.isArray(specializations) || specializations.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide at least one specialization in the specializations array'
+        });
+      }
+  
+      // Validate that specializations are from the allowed enum
+      const invalidSpecializations = specializations.filter(spec => !specializationEnum.includes(spec));
+      if (invalidSpecializations.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid specialization(s): ${invalidSpecializations.join(', ')}`,
+          validSpecializations: specializationEnum
+        });
+      }
+  
+      // Build base query for active doctors
+      const query = {
+        isActive: true,
+        'verification.status': 'verified'
+      };
+  
+      // Filter by specializations - doctors who have ANY of the specializations in the array
+      query.specializations = { $in: specializations };
+  
+      // Execute query without pagination
+      const doctors = await Doctor.find(query)
+        .populate('user', 'fullName profilePhoto _id')
+        .populate({
+          path: 'hospitalAffiliations.hospital',
+          select: 'name address',
+          match: { isActive: true } // Only include active hospitals
+        })
+        .sort({ experience: -1 })
+        .lean();
+  
+      // Filter out any null hospital affiliations
+      const filteredDoctors = doctors.map(doctor => {
+        if (doctor.hospitalAffiliations) {
+          doctor.hospitalAffiliations = doctor.hospitalAffiliations.filter(
+            aff => aff.hospital !== null
+          );
+        }
+        return doctor;
+      });
+  
+      // Get total count
+      const total = doctors.length;
+  
+      // Return formatted response without pagination details
+      res.json({
+        success: true,
+        data: filteredDoctors,
+        total
+      });
+  
+    } catch (error) {
+      console.error('Get doctors by specializations error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch doctors by specializations',
+        error: error.message
+      });
+    }
+  },
+
   searchDoctors: async (req, res) => {
     try {
       const {
         specialization,
-        subSpecializations,
+        page = 1,
+        limit = 15,
         city,
         state,
-        pinCode,
-        page = 1,
-        limit = 15
+        pinCode
       } = req.query;
 
       // Validate and parse pagination
@@ -597,48 +786,39 @@ const DoctorController = {
         isActive: true,
         // 'verification.status': 'verified' // Changed from boolean to string match
       };
-      
+
       // Add search filters
       if (specialization) {
-        query.specialization = { 
-          $regex: sanitizeRegex(specialization), 
-          $options: 'i' 
+        // Search for doctors who have this specialization in their array
+        query.specializations = {
+          $elemMatch: {
+            $regex: sanitizeRegex(specialization),
+            $options: 'i'
+          }
         };
       }
-      
-      if (subSpecializations) {
-        const subSpecs = Array.isArray(subSpecializations) 
-          ? subSpecializations 
-          : [subSpecializations];
-        
-        if (subSpecs.length > 0) {
-          query.subSpecializations = { 
-            $in: subSpecs.map(sub => new RegExp(sanitizeRegex(sub), 'i'))
-          };
-        }
-      }
-      
+
       if (city) {
-        query['address.city'] = { 
-          $regex: sanitizeRegex(city), 
-          $options: 'i' 
+        query['address.city'] = {
+          $regex: sanitizeRegex(city),
+          $options: 'i'
         };
       }
-      
+
       if (state) {
-        query['address.state'] = { 
-          $regex: sanitizeRegex(state), 
-          $options: 'i' 
+        query['address.state'] = {
+          $regex: sanitizeRegex(state),
+          $options: 'i'
         };
       }
-      
+
       if (pinCode) {
         query['address.pinCode'] = String(pinCode).trim();
       }
-      
+
       // Execute query
       const skip = (pageNum - 1) * limitNum;
-      
+
       const doctors = await Doctor.find(query)
         .populate('user', 'fullName profilePhoto _id')
         .populate({
@@ -650,7 +830,7 @@ const DoctorController = {
         .skip(skip)
         .limit(limitNum)
         .lean();
-      
+
       // Filter out any null hospital affiliations
       const filteredDoctors = doctors.map(doctor => {
         if (doctor.hospitalAffiliations) {
@@ -660,9 +840,9 @@ const DoctorController = {
         }
         return doctor;
       });
-      
+
       const total = await Doctor.countDocuments(query);
-      
+
       // Format response
       res.json({
         success: true,
@@ -696,11 +876,10 @@ const DoctorController = {
         longitude,
         latitude,
         specialization,
-        subSpecializations,
         page = 1,
         limit = 15
       } = req.query;
-      
+
       // Validate coordinates
       if (!longitude || !latitude) {
         return res.status(400).json({
@@ -708,11 +887,11 @@ const DoctorController = {
           message: 'Longitude and latitude are required'
         });
       }
-      
+
       const coords = [parseFloat(longitude), parseFloat(latitude)];
       const pageNum = Math.max(1, parseInt(page));
       const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
-      
+
       // Build base query without distance restriction
       const query = {
         'address.coordinates': {
@@ -721,30 +900,24 @@ const DoctorController = {
         },
         isActive: true
       };
-      
+
       // Add filters
       if (specialization) {
-        query.specialization = { $regex: sanitizeRegex(specialization), $options: 'i' };
+        // Changed to check in specializations array
+        query.specializations = {
+          $elemMatch: {
+            $regex: sanitizeRegex(specialization),
+            $options: 'i'
+          }
+        };
       }
-      
-      if (subSpecializations) {
-        const subSpecs = Array.isArray(subSpecializations)
-          ? subSpecializations
-          : [subSpecializations];
-        
-        if (subSpecs.length > 0) {
-          query.subSpecializations = {
-            $in: subSpecs.map(sanitizeRegex)
-          };
-        }
-      }
-      
+
       // First get all matching doctors
       const allDoctors = await Doctor.find(query)
         .populate('user', 'fullName profilePhoto')
         .populate('hospitalAffiliations.hospital', 'name address')
         .lean();
-      
+
       // Calculate distances and add to each doctor object
       allDoctors.forEach(doctor => {
         if (doctor.address?.coordinates) {
@@ -757,15 +930,15 @@ const DoctorController = {
           doctor.distance = Infinity; // Handle cases where coordinates might be missing
         }
       });
-      
+
       // Sort by distance (nearest first)
       allDoctors.sort((a, b) => a.distance - b.distance);
-      
+
       // Apply pagination
       const total = allDoctors.length;
       const skip = (pageNum - 1) * limitNum;
       const doctors = allDoctors.slice(skip, skip + limitNum);
-      
+
       // Format response
       res.json({
         success: true,
@@ -819,31 +992,31 @@ const DoctorController = {
       const query = {
         'hospitalAffiliations.hospital': hospitalId
       };
-      
+
       if (specialization) {
         query.specialization = { $regex: sanitizeRegex(specialization), $options: 'i' };
       }
-      
+
       if (isVerified !== undefined) {
         query['verification.status'] = isVerified === 'true' ? 'verified' : { $ne: 'verified' };
       }
-      
+
       if (isActive !== undefined) {
         query.isActive = isActive === 'true';
       }
-      
+
       // Execute query
       const skip = (pageNum - 1) * limitNum;
-      
+
       const doctors = await Doctor.find(query)
         .populate('user', 'name email profileImage phoneNumber')
         .populate('hospitalAffiliations.hospital', 'name address')
         .skip(skip)
         .limit(limitNum)
         .lean();
-      
+
       const total = await Doctor.countDocuments(query);
-      
+
       // Format response
       res.json({
         success: true,
@@ -866,37 +1039,39 @@ const DoctorController = {
     }
   },
 
-  insertDummyData: async(req, res) => {
+  insertDummyData: async (req, res) => {
     try {
-      const {user, doctor, hospital} = req.body;
+      const { user, doctor, hospital } = req.body;
       const saveUser = await User.create(user);
-      const saveDoctor = await Doctor.create({...doctor, user: saveUser._id});
-      const saveHospital = await Hospital.create({...hospital, doctors: [saveDoctor._id]});
+      const saveDoctor = await Doctor.create({ ...doctor, user: saveUser._id });
+      const saveHospital = await Hospital.create({ ...hospital, doctors: [saveDoctor._id] });
       saveDoctor.address = hospital.address;
       saveDoctor.hospitalAffiliations = [
-        {hospital: saveHospital._id,
-        department: "Cardiology",
-        position: "Senior Consultant"}
+        {
+          hospital: saveHospital._id,
+          department: "Cardiology",
+          position: "Senior Consultant"
+        }
       ]
       await saveDoctor.save();
 
-      res.status(201).send({message: "Dummy data inserted", success: true});
+      res.status(201).send({ message: "Dummy data inserted", success: true });
     } catch (error) {
       console.log("Error in the insertDummyData, ", error);
-      res.status(500).send({error: "Internal server error...", success: false});
+      res.status(500).send({ error: "Internal server error...", success: false });
     }
   },
 
-  getAllHospitals: async( req, res) => {
+  getAllHospitals: async (req, res) => {
     try {
       const hospitals = await Hospital.find().select("name");
-      res.status(200).send({success: true, hospitals});
+      res.status(200).send({ success: true, hospitals });
     } catch (error) {
       console.log("Error in the getAllHospitals, ", error);
-      res.status(500).send({error: "Internal server error...", success: false});
+      res.status(500).send({ error: "Internal server error...", success: false });
     }
   }
- 
+
 };
 
 
