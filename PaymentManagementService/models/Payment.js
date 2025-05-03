@@ -43,7 +43,8 @@ const paymentSchema = new mongoose.Schema({
     gateway: {
         name: String,
         transactionId: String,
-        referenceId: String
+        referenceId: String,
+        captureId: String 
     },
     refund: {
         amount: Number,
@@ -169,81 +170,133 @@ paymentSchema.methods.processPayment = async function () {
 };
 
 // Process refund
+/**
+ * Process refund with Razorpay integration
+ * Now handles automatic refunds through Razorpay API
+ */
 paymentSchema.methods.processRefund = async function (refundAmount, reason, initiatedBy) {
     if (this.status !== 'captured') {
-        throw new Error('Payment must be captured before refunding');
+      throw new Error('Payment must be captured before refunding');
     }
-
+  
     if (refundAmount > this.amount) {
-        throw new Error('Refund amount cannot exceed payment amount');
+      throw new Error('Refund amount cannot exceed payment amount');
     }
-
+  
+    if (!this.gateway || !this.gateway.transactionId) {
+      throw new Error('Payment gateway information missing');
+    }
+  
     const session = await mongoose.startSession();
     session.startTransaction();
-
+  
     try {
-        // Update payment with refund details
-        this.refund = {
-            amount: refundAmount,
-            reason,
-            initiatedBy,
-            status: "processed"
-        };
-
-        this.status = refundAmount === this.amount ? "refunded" : "partially_refunded";
-        await this.save({ session });
-
-        // Create refund transaction for patient
-        await Transaction.createTransaction({
-            user: this.patient,
-            type: "refund",
-            amount: refundAmount,
-            referenceId: this._id,
-            referenceType: "Payment",
-            status: "completed",
-            notes: `Refund for appointment ${this.appointment}: ${reason}`
-        }, { session });
-
-        // If doctor already received payment, adjust wallet
-        if (refundAmount > 0) {
-            const wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
-
-            if (wallet) {
-                // Calculate the doctor's portion of the refund
-                const commission = wallet.commission_rate || 20;
-                const doctorSharePercentage = (100 - commission) / 100;
-                const doctorRefundAmount = refundAmount * doctorSharePercentage;
-
-                // Only deduct if wallet has sufficient balance
-                if (wallet.current_balance >= doctorRefundAmount) {
-                    wallet.current_balance -= doctorRefundAmount;
-                    wallet.total_earned -= doctorRefundAmount; // Adjust total earned
-                    await wallet.save({ session });
-
-                    // Create transaction for doctor refund deduction
-                    await Transaction.createTransaction({
-                        user: this.doctor,
-                        type: "refund",
-                        amount: -doctorRefundAmount, // Negative to indicate deduction
-                        referenceId: this._id,
-                        referenceType: "Payment",
-                        status: "completed",
-                        notes: `Refund deduction for appointment ${this.appointment}`
-                    }, { session });
-                }
-            }
+      // 1. First initiate the Razorpay refund
+      const razorpayRefund = await initiateRazorpayRefund(
+        this.gateway.transactionId,
+        refundAmount,
+        'normal' // or 'optimum' for faster processing
+      );
+  
+      console.log('Razorpay refund initiated:', razorpayRefund.id);
+  
+      // 2. Update payment with refund details
+      this.refund = {
+        amount: refundAmount,
+        reason,
+        initiatedBy,
+        status: "processed",
+        gatewayRefundId: razorpayRefund.id
+      };
+  
+      this.status = refundAmount === this.amount ? "refunded" : "partially_refunded";
+      await this.save({ session });
+  
+      // 3. Create refund transaction for patient
+      await Transaction.createTransaction({
+        user: this.patient,
+        type: "refund",
+        amount: refundAmount,
+        referenceId: this._id,
+        referenceType: "Payment",
+        status: "completed",
+        notes: `Refund for appointment ${this.appointment}: ${reason}`
+      }, { session });
+  
+      // 4. If doctor already received payment, adjust wallet
+      if (refundAmount > 0) {
+        const wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
+  
+        if (wallet) {
+          // Calculate the doctor's portion of the refund
+          const commission = wallet.commission_rate || 20;
+          const doctorSharePercentage = (100 - commission) / 100;
+          const doctorRefundAmount = refundAmount * doctorSharePercentage;
+  
+          // Only deduct if wallet has sufficient balance
+          if (wallet.current_balance >= doctorRefundAmount) {
+            wallet.current_balance -= doctorRefundAmount;
+            wallet.total_earned -= doctorRefundAmount;
+            await wallet.save({ session });
+  
+            // Create transaction for doctor refund deduction
+            await Transaction.createTransaction({
+              user: this.doctor,
+              type: "refund",
+              amount: -doctorRefundAmount,
+              referenceId: this._id,
+              referenceType: "Payment",
+              status: "completed",
+              notes: `Refund deduction for appointment ${this.appointment}`
+            }, { session });
+          } else {
+            // Handle insufficient balance case
+            console.warn(`Insufficient balance in doctor's wallet for refund deduction`);
+            // You might want to track this for manual follow-up
+          }
         }
-
-        await session.commitTransaction();
-        session.endSession();
-
-        return this;
+      }
+  
+      await session.commitTransaction();
+      session.endSession();
+  
+      return {
+        payment: this,
+        razorpayRefund
+      };
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        throw error;
+      await session.abortTransaction();
+      session.endSession();
+      
+      // Handle specific Razorpay errors
+      if (error.error && error.error.description) {
+        throw new Error(`Razorpay refund failed: ${error.error.description}`);
+      }
+      throw error;
     }
-};
+  };
+  
+  /**
+   * Automatic refund trigger for failed appointments
+   */
+  paymentSchema.statics.autoRefund = async function(paymentId, reason = "Appointment cancellation") {
+    const payment = await this.findById(paymentId);
+    
+    if (!payment) {
+      throw new Error('Payment not found');
+    }
+    
+    if (payment.status !== 'captured') {
+      throw new Error('Only captured payments can be refunded');
+    }
+    
+    if (payment.refund && payment.refund.status === 'processed') {
+      throw new Error('Refund already processed');
+    }
+    
+    // Process full refund
+    return payment.processRefund(payment.amount, reason, 'system');
+  };
 
 const Payment = mongoose.model("Payment", paymentSchema);
 module.exports = Payment;
