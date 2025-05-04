@@ -1,7 +1,8 @@
-// Payment.js
+// Modified Payment.js with Upcoming Earnings feature
 const mongoose = require("mongoose");
 const Wallet = require("./Wallet");
 const Transaction = require("./Transaction");
+const UpcomingEarnings = require("./UpcomingEarnings");
 
 const paymentSchema = new mongoose.Schema({
     appointment: {
@@ -57,13 +58,17 @@ const paymentSchema = new mongoose.Schema({
             type: String,
             enum: ["pending", "processed", "failed"]
         }
+    },
+    upcomingEarning: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "UpcomingEarnings"
     }
 }, {
     timestamps: true
 });
 
 // Create payment and transaction record
-paymentSchema.statics.createPayment = async function (paymentData) {
+paymentSchema.statics.createPayment = async function (paymentData, appointmentDate) {
     const session = await mongoose.startSession();
     session.startTransaction();
 
@@ -82,6 +87,29 @@ paymentSchema.statics.createPayment = async function (paymentData) {
             status: payment.status === "captured" ? "completed" : "pending",
             notes: `Payment for appointment ${payment.appointment}`
         }, { session });
+
+        // If payment is captured, create upcoming earnings record
+        if (payment.status === "captured") {
+            // Calculate doctor's share
+            const wallet = await Wallet.findOne({ doctor: payment.doctor }).session(session);
+            const commission = wallet ? wallet.commission_rate : 20;
+            const doctorShare = payment.amount * ((100 - commission) / 100);
+
+            // Create upcoming earnings record
+            const upcomingEarning = await UpcomingEarnings.createUpcomingEarning({
+                doctor: payment.doctor,
+                appointment: payment.appointment,
+                amount: doctorShare,
+                payment: payment._id,
+                scheduledDate: appointmentDate || new Date(),
+                status: "pending",
+                notes: `Pending earnings for appointment ${payment.appointment}`
+            }, session);
+
+            // Link upcoming earning to payment
+            payment.upcomingEarning = upcomingEarning._id;
+            await payment.save({ session });
+        }
 
         await session.commitTransaction();
         session.endSession();
@@ -108,36 +136,15 @@ paymentSchema.methods.processPayment = async function () {
     try {
         console.log('Transaction session started');
 
-        // Find or create wallet within the same session
-        let wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
-        console.log('Wallet found/created:', wallet ? wallet._id : 'new wallet');
-
-        if (!wallet) {
-            wallet = new Wallet({
-                doctor: this.doctor,
-                current_balance: 0,
-                total_earned: 0,
-                last_payment_date: new Date()
-            });
-            await wallet.save({ session });
-            console.log('New wallet created for doctor:', this.doctor);
+        // Find the upcoming earning record
+        const upcomingEarning = await UpcomingEarnings.findById(this.upcomingEarning).session(session);
+        
+        if (!upcomingEarning) {
+            throw new Error('Upcoming earning record not found');
         }
-
-        const commission = wallet.commission_rate || 20;
-        const platformCommission = this.amount * (commission / 100);
-        const doctorShare = this.amount - platformCommission;
-
-        console.log(`Calculated - Total: ${this.amount}, Commission: ${platformCommission}, Doctor Share: ${doctorShare}`);
-
-        // Update doctor's wallet with session
-        await wallet.addFunds(
-            doctorShare,
-            'appointment',
-            `Payment for appointment ${this.appointment}`,
-            this._id,
-            session
-        );
-        console.log('Funds added to doctor wallet');
+        
+        // Process the earning to add funds to wallet
+        const result = await upcomingEarning.processEarning(session);
 
         // Update transaction record for patient
         await Transaction.updateOne(
@@ -155,6 +162,12 @@ paymentSchema.methods.processPayment = async function () {
         session.endSession();
         console.log('Transaction committed successfully');
 
+        // Calculate commission for the response
+        const wallet = result.wallet;
+        const commission = wallet.commission_rate || 20;
+        const platformCommission = this.amount * (commission / 100);
+        const doctorShare = upcomingEarning.amount;
+
         return { 
             doctorShare, 
             platformCommission,
@@ -169,11 +182,7 @@ paymentSchema.methods.processPayment = async function () {
     }
 };
 
-// Process refund
-/**
- * Process refund with Razorpay integration
- * Now handles automatic refunds through Razorpay API
- */
+// Process refund with modifications for upcoming earnings
 paymentSchema.methods.processRefund = async function (refundAmount, reason, initiatedBy) {
     if (this.status !== 'captured') {
       throw new Error('Payment must be captured before refunding');
@@ -223,7 +232,24 @@ paymentSchema.methods.processRefund = async function (refundAmount, reason, init
         notes: `Refund for appointment ${this.appointment}: ${reason}`
       }, { session });
   
-      // 4. If doctor already received payment, adjust wallet
+      // 4. Handle upcoming earnings adjustment
+      if (this.upcomingEarning) {
+        const upcomingEarning = await UpcomingEarnings.findById(this.upcomingEarning).session(session);
+        
+        if (upcomingEarning && upcomingEarning.status === "pending") {
+          // If full refund, mark as refunded
+          if (refundAmount === this.amount) {
+            upcomingEarning.status = "refunded";
+          } else {
+            // If partial refund, adjust the amount proportionally
+            const refundRatio = refundAmount / this.amount;
+            upcomingEarning.amount = upcomingEarning.amount * (1 - refundRatio);
+          }
+          await upcomingEarning.save({ session });
+        }
+      }
+
+      // 5. If doctor already received payment, adjust wallet
       if (refundAmount > 0) {
         const wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
   
