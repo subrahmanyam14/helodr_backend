@@ -777,11 +777,14 @@ const DoctorController = {
     try {
       const {
         specialization,
+        doctorName,
+        hospitalName,
         page = 1,
         limit = 15,
         city,
         state,
-        pinCode
+        pinCode,
+        searchType
       } = req.query;
 
       // Validate and parse pagination
@@ -789,89 +792,278 @@ const DoctorController = {
       const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
 
       // Build query - only active and verified doctors
-      const query = {
+      const baseQuery = {
         isActive: true,
         // 'verification.status': 'verified' // Changed from boolean to string match
       };
 
-      // Add search filters
-      if (specialization) {
-        // Search for doctors who have this specialization in their array
-        query.specializations = {
-          $elemMatch: {
-            $regex: sanitizeRegex(specialization),
-            $options: 'i'
-          }
-        };
-      }
+      // Add search filters for doctors
+      let doctorQuery = { ...baseQuery };
 
+      // Location filters for doctors
       if (city) {
-        query['address.city'] = {
+        doctorQuery['address.city'] = {
           $regex: sanitizeRegex(city),
           $options: 'i'
         };
       }
 
       if (state) {
-        query['address.state'] = {
+        doctorQuery['address.state'] = {
           $regex: sanitizeRegex(state),
           $options: 'i'
         };
       }
 
       if (pinCode) {
-        query['address.pinCode'] = String(pinCode).trim();
+        doctorQuery['address.pinCode'] = String(pinCode).trim();
       }
 
-      // Execute query
+      // Build hospital query
+      const hospitalQuery = {};
+
+      // Location filters for hospitals
+      if (city) {
+        hospitalQuery['address.city'] = {
+          $regex: sanitizeRegex(city),
+          $options: 'i'
+        };
+      }
+
+      if (state) {
+        hospitalQuery['address.state'] = {
+          $regex: sanitizeRegex(state),
+          $options: 'i'
+        };
+      }
+
+      if (pinCode) {
+        hospitalQuery['address.pinCode'] = String(pinCode).trim();
+      }
+
+      // Add specific search criteria based on searchType
+      if (searchType === 'specialization' && specialization) {
+        // Search for doctors who have this specialization in their array
+        doctorQuery.specializations = {
+          $elemMatch: {
+            $regex: sanitizeRegex(specialization),
+            $options: 'i'
+          }
+        };
+      } else if (searchType === 'doctor' && doctorName) {
+        // Search for doctors by name
+        doctorQuery.fullName = {
+          $regex: sanitizeRegex(doctorName),
+          $options: 'i'
+        };
+      } else if (searchType === 'hospital' && hospitalName) {
+        // Add hospital name to hospital query
+        hospitalQuery.name = {
+          $regex: sanitizeRegex(hospitalName),
+          $options: 'i'
+        };
+      }
+
+      let doctors = [];
+      let hospitals = [];
+      let totalDoctors = 0;
+      let totalHospitals = 0;
+      let hospitalIds = [];
+      let doctorHospitalIds = new Set();
+
+      // Skip values for pagination
       const skip = (pageNum - 1) * limitNum;
 
-      const doctors = await Doctor.find(query)
-        .populate('user', 'fullName profilePhoto _id')
-        .populate({
-          path: 'hospitalAffiliations.hospital',
-          select: 'name address',
-          match: { isActive: true } // Only include active hospitals
-        })
-        .sort({ experience: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean();
+      // SEARCH FLOW 1: If searching by doctor name or specialization
+      if (searchType === 'doctor' || searchType === 'specialization') {
+        // First find doctors matching the criteria
+        doctors = await Doctor.find(doctorQuery)
+          .populate('user', 'fullName profilePhoto _id')
+          .populate({
+            path: 'hospitalAffiliations.hospital',
+            select: 'name address type services _id',
+            // Temporarily remove the match filter to see all hospitals
+            // match: { isActive: true }
+          })
+          .sort({ experience: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean();
 
-      // Filter out any null hospital affiliations
-      const filteredDoctors = doctors.map(doctor => {
-        if (doctor.hospitalAffiliations) {
-          doctor.hospitalAffiliations = doctor.hospitalAffiliations.filter(
-            aff => aff.hospital !== null
-          );
+        totalDoctors = await Doctor.countDocuments(doctorQuery);
+
+        // Extract hospital IDs from all doctor affiliations to find hospitals
+        doctors.forEach(doctor => {
+          if (doctor.hospitalAffiliations && Array.isArray(doctor.hospitalAffiliations)) {
+            doctor.hospitalAffiliations.forEach(affiliation => {
+              if (affiliation && affiliation.hospital && affiliation.hospital._id) {
+                doctorHospitalIds.add(affiliation.hospital._id.toString());
+              }
+            });
+          }
+        });
+
+        // Find hospitals associated with these doctors
+        if (doctorHospitalIds.size > 0) {
+          hospitals = await Hospital.find({
+            _id: { $in: Array.from(doctorHospitalIds) }
+          })
+            .select('_id name address type ratings services')
+            .sort({ name: 1 })
+            .lean();
+
+          totalHospitals = hospitals.length;
         }
+      }
+      // SEARCH FLOW 2: If searching by hospital name
+      else if (searchType === 'hospital') {
+        // First find hospitals matching the criteria
+        hospitals = await Hospital.find(hospitalQuery)
+          .select('_id name address type ratings services')
+          .sort({ name: 1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean();
+
+        totalHospitals = await Hospital.countDocuments(hospitalQuery);
+
+        // Extract hospital IDs
+        hospitalIds = hospitals.map(h => h._id);
+
+        // Find doctors affiliated with these hospitals
+        if (hospitalIds.length > 0) {
+          const affiliatedDoctorsQuery = {
+            ...baseQuery,
+            'hospitalAffiliations.hospital': { $in: hospitalIds }
+          };
+
+          doctors = await Doctor.find(affiliatedDoctorsQuery)
+            .populate('user', 'fullName profilePhoto _id')
+            .populate({
+              path: 'hospitalAffiliations.hospital',
+              select: 'name address type services _id',
+              // Temporarily remove the match filter
+              // match: { isActive: true }
+            })
+            .sort({ experience: -1 })
+            .lean();
+
+          totalDoctors = await Doctor.countDocuments(affiliatedDoctorsQuery);
+        }
+      }
+      // SEARCH FLOW 3: If only location filters are provided
+      else {
+        // Fetch both doctors and hospitals based on location
+        const [doctorsResults, hospitalsResults] = await Promise.all([
+          Doctor.find(doctorQuery)
+            .populate('user', 'fullName profilePhoto _id')
+            .populate({
+              path: 'hospitalAffiliations.hospital',
+              select: 'name address type services _id',
+              // Temporarily remove the match filter
+              // match: { isActive: true }
+            })
+            .sort({ experience: -1 })
+            .skip(skip)
+            .limit(limitNum)
+            .lean(),
+
+          Hospital.find(hospitalQuery)
+            .select('_id name address type ratings services')
+            .sort({ name: 1 })
+            .skip(skip)
+            .limit(limitNum)
+            .lean()
+        ]);
+
+        doctors = doctorsResults;
+        hospitals = hospitalsResults;
+
+        totalDoctors = await Doctor.countDocuments(doctorQuery);
+        totalHospitals = await Hospital.countDocuments(hospitalQuery);
+      }
+
+      // Add direct doctor check for debugging
+      if (doctors.length > 0) {
+        const doctorId = doctors[0]._id;
+
+        const directDoctorCheck = await Doctor.findById(doctorId)
+          .populate({
+            path: 'hospitalAffiliations.hospital',
+            select: 'name address type services _id'
+          })
+          .lean();
+
+      }
+
+      // Filter out null hospital affiliations for all doctors
+      const filteredDoctors = doctors.map(doctor => {
+        if (doctor.hospitalAffiliations && Array.isArray(doctor.hospitalAffiliations)) {
+          // Filter out affiliations with null hospitals
+          doctor.hospitalAffiliations = doctor.hospitalAffiliations.filter(
+            aff => aff && aff.hospital !== null
+          );
+
+          // If all affiliations were removed, provide an empty array
+          if (doctor.hospitalAffiliations.length === 0) {
+            doctor.hospitalAffiliations = [];
+          }
+        } else {
+          // Ensure hospitalAffiliations is always an array
+          doctor.hospitalAffiliations = [];
+        }
+
         return doctor;
       });
 
-      const total = await Doctor.countDocuments(query);
+      // Add associated doctors count to each hospital for display purposes
+      const enhancedHospitals = hospitals.map(hospital => {
+        const associatedDoctors = filteredDoctors.filter(doctor =>
+          doctor.hospitalAffiliations.some(aff =>
+            aff.hospital && aff.hospital._id &&
+            aff.hospital._id.toString() === hospital._id.toString()
+          )
+        );
+        return {
+          ...hospital,
+          doctorsCount: associatedDoctors.length
+        };
+      });
 
       // Format response
       res.json({
         success: true,
-        data: filteredDoctors,
+        data: {
+          doctors: filteredDoctors,
+          hospitals: enhancedHospitals
+        },
         pagination: {
-          total,
-          page: pageNum,
-          limit: limitNum,
-          pages: Math.ceil(total / limitNum),
-          hasNext: pageNum * limitNum < total
+          doctors: {
+            total: totalDoctors,
+            page: pageNum,
+            limit: limitNum,
+            pages: Math.ceil(totalDoctors / limitNum),
+            hasNext: pageNum * limitNum < totalDoctors
+          },
+          hospitals: {
+            total: totalHospitals,
+            page: pageNum,
+            limit: limitNum,
+            pages: Math.ceil(totalHospitals / limitNum),
+            hasNext: pageNum * limitNum < totalHospitals
+          }
         }
       });
     } catch (error) {
       console.error('Search doctors error:', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to search doctors',
+        message: 'Failed to search doctors and hospitals',
         error: error.message
       });
     }
   },
-  
+
   findNearbyDoctors: async (req, res) => {
     try {
       const {
@@ -1084,7 +1276,7 @@ const DoctorController = {
       });
     }
   }
-  
+
 
 };
 
