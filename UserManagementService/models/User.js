@@ -99,6 +99,10 @@ const userSchema = new mongoose.Schema(
     country: {
       type: String,
       default: "India"
+    },
+    doctorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Doctor"
     }
   },
   {

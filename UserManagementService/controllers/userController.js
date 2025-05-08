@@ -479,6 +479,9 @@ exports.verifyEmail = async( req, res ) => {
         message: 'User not found'
       });
     }
+    user.isEmailVerified = true;
+    await user.save();
+
      // Generate proper auth token 
      const authToken = jwt.sign(
       { id: user._id, role: user.role },
@@ -828,17 +831,19 @@ exports.sendEmailVerification = async (req, res) => {
 
     // Send email verification request with error handling
     try {
-      const response = await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/mail/sendEmailVerification`, {
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendEmailVerification`, {
         fullName: user.fullName,
         email,
         token,
-        url: `${process.env.USER_MANAGEMENT_SERVICE_URL}/users/verify-email`
+        url: process.env.FRONTEND_URL
       });
 
       // Check if the email service returned success
-      if (response.data.success !== true) {
+      if (response.status !== 200) {
         throw new Error(response.data.message || 'Failed to send email verification');
       }
+
+      
     } catch (apiError) {
       console.error('Error sending email verification:', apiError.response?.data || apiError.message);
       return res.status(500).json({
