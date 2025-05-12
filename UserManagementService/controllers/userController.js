@@ -56,10 +56,15 @@ exports.login = async (req, res) => {
       }
 
       const token = jwt.sign(
-        { id: user._id, role: user.role },
+        {
+          id: user._id,
+          role: user.role,
+          ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
+        },
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
+      
 
       // Update login status
       await LoginStatus.findOneAndUpdate(user._id, {
@@ -399,7 +404,11 @@ exports.verifyMobileOTP = async (req, res) => {
 
     // Generate proper auth token 
     const authToken = jwt.sign(
-      { id: user._id, role: user.role },
+      {
+        id: user._id,
+        role: user.role,
+        ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
+      },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -484,7 +493,11 @@ exports.verifyEmail = async( req, res ) => {
 
      // Generate proper auth token 
      const authToken = jwt.sign(
-      { id: user._id, role: user.role },
+      {
+        id: user._id,
+        role: user.role,
+        ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
+      },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );

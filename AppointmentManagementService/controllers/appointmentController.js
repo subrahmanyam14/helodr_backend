@@ -6,10 +6,9 @@ const Doctor = require('../models/Doctor'); // Added missing import
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Statistics = require("../models/Statistics");
+const UpcomingEarnings = require("../models/UpcomingEarnings");
 
-// @desc    Book an appointment
-// @route   POST /api/appointments
-// @access  Private (Patient)
+
 
 exports.bookAppointment = async (req, res) => {
   const session = await mongoose.startSession();
@@ -90,7 +89,6 @@ exports.bookAppointment = async (req, res) => {
   }
 };
 
-// Helper function to calculate end time
 function calculateEndTime(startTime, durationMinutes) {
   const [hours, minutes] = startTime.split(':').map(Number);
   const startDate = new Date();
@@ -100,8 +98,6 @@ function calculateEndTime(startTime, durationMinutes) {
   return `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`;
 }
 
-
-// Helper function to calculate appointment fee
 async function calculateAppointmentFee(doctorId, consultationType) {
   const doctor = await Doctor.findById(doctorId);
   if (!doctor) throw new Error('Doctor not found');
@@ -116,9 +112,6 @@ async function calculateAppointmentFee(doctorId, consultationType) {
   }
 }
 
-// @desc    Get appointments
-// @route   GET /api/appointments
-// @access  Private
 exports.getAppointments = async (req, res) => {
   try {
     let query = {};
@@ -175,9 +168,6 @@ exports.getAppointments = async (req, res) => {
   }
 };
 
-// @desc    Get single appointment
-// @route   GET /api/appointments/:id
-// @access  Private
 exports.getAppointment = async (req, res) => {
   try {
     let query = { _id: req.params.id };
@@ -213,14 +203,11 @@ exports.getAppointment = async (req, res) => {
   }
 };
 
-// @desc    Update appointment status
-// @route   PUT /api/appointments/:id/status
-// @access  Private (Doctor/Patient)
 exports.updateAppointmentStatus = async (req, res) => {
   try {
     const { status } = req.body;
     let query = { _id: req.params.id };
-
+    console.log("User details: ", req.user);
     // Patients can only cancel their own appointments
     if (req.user.role === 'patient') {
       query.patient = req.user.id;
@@ -256,13 +243,11 @@ exports.updateAppointmentStatus = async (req, res) => {
 
     res.status(200).json({ success: true, data: appointment });
   } catch (err) {
+    console.log("Error in the updateAppointmentStatus, ", err);
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 };
 
-// @desc    Add prescription to appointment
-// @route   PUT /api/appointments/:id/prescription
-// @access  Private (Doctor)
 exports.addPrescription = async (req, res) => {
   try {
     const { doctorId, diagnosis, medicines, tests, advice, followUpDate } = req.body;
@@ -299,7 +284,6 @@ exports.addPrescription = async (req, res) => {
   }
 };
 
-// Helper function to calculate end time
 function calculateEndTime(startTime, duration) {
   const [hours, minutes] = startTime.split(':').map(Number);
   const startDate = new Date();
@@ -308,7 +292,6 @@ function calculateEndTime(startTime, duration) {
   return `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`;
 }
 
-// Helper function to calculate appointment fee
 async function calculateAppointmentFee(doctorId, consultationType) {
   const doctor = await Doctor.findById(doctorId);
   if (!doctor) throw new Error('Doctor not found');
@@ -323,8 +306,6 @@ async function calculateAppointmentFee(doctorId, consultationType) {
   }
 }
 
-
-//  Upcoming Video Appointments
 exports.getUpcomingVideoAppointments = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -341,7 +322,6 @@ exports.getUpcomingVideoAppointments = async (req, res) => {
   }
 };
 
-//  Upcoming Clinic Appointments
 exports.getUpcomingClinicAppointments = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -358,7 +338,6 @@ exports.getUpcomingClinicAppointments = async (req, res) => {
   }
 };
 
-//  Cancelled Appointments
 exports.getCancelledAppointments = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -372,7 +351,6 @@ exports.getCancelledAppointments = async (req, res) => {
   }
 };
 
-//getting the patients assigned to a doctor when doctor logged in
 exports.getDoctorPatients = async (req, res) => {
   try {
     const doctorId = req.body;
@@ -540,7 +518,6 @@ exports.getDoctorPatientById = async (req, res) => {
   }
 };
 
-//doctor adding notes to patient throgh patient id
 exports.addPatientNotes = async (req, res) => {
   try {
     const doctorId = req.user?.doctorId;
@@ -670,4 +647,304 @@ exports.addReviewByPatient = async (req, res) => {
     });
   }
 };
+
+exports.getDoctorConfirmedAppointmentsForCurrentMonth = async (req, res) => {
+  try {
+    // Validate doctor ID
+    if (!mongoose.Types.ObjectId.isValid(req.params.doctorId)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid doctor ID"
+      });
+    }
+
+    // Get current date and calculate start/end of month
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    const appointments = await Appointment.find({
+      doctor: req.params.doctorId,
+      status: "confirmed",
+      date: {
+        $gte: firstDayOfMonth,
+        $lte: lastDayOfMonth
+      }
+    })
+    .populate({
+      path: "patient",
+      select: "fullName email countryCode mobileNumber gender dateOfBirth" // Include additional patient details
+    })
+    .populate({
+      path: "doctor",
+      select: "fullName specializations " // Include additional doctor details
+    })
+    .sort({ date: 1, "slot.startTime": 1 }); // Sort by date and time
+
+    res.status(200).json({
+      success: true,
+      count: appointments.length,
+      data: appointments,
+      month: now.toLocaleString('default', { month: 'long' }),
+      year: now.getFullYear()
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      error: "Server Error"
+    });
+  }
+};
+
+exports.getDoctorWeeklyRating = async (req, res) => {
+  const { doctorId } = req.params;
+
+  try {
+    // Validate doctorId
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({ success: false, message: "Invalid doctor ID" });
+    }
+
+    // Get start and end of the current week (Sunday to Saturday)
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Sunday
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - dayOfWeek);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    // Aggregate ratings
+    const ratings = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(doctorId),
+          "review.rating": { $exists: true },
+          "review.createdAt": {
+            $gte: startOfWeek,
+            $lte: endOfWeek
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          averageRating: { $avg: "$review.rating" },
+          totalReviews: { $sum: 1 }
+        }
+      }
+    ]);
+
+    if (ratings.length === 0) {
+      return res.status(200).json({
+        success: true,
+        averageRating: null,
+        totalReviews: 0,
+        message: "No reviews for this week"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      averageRating: ratings[0].averageRating.toFixed(2),
+      totalReviews: ratings[0].totalReviews
+    });
+  } catch (error) {
+    console.error("Error fetching weekly rating:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
+exports.getTotalPatientsByDoctor = async (req, res) => {
+  const { doctorId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+    return res.status(400).json({ success: false, message: "Invalid doctor ID" });
+  }
+
+  try {
+    // Unique patient count overall
+    const uniquePatients = await Appointment.distinct("patient", {
+      doctor: doctorId
+    });
+
+    // Group by quarter and year
+    const quarterStats = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(doctorId)
+        }
+      },
+      {
+        $group: {
+          _id: {
+            patient: "$patient",
+            year: { $year: "$date" },
+            quarter: {
+              $ceil: { $divide: [{ $month: "$date" }, 3] } // 1-3 = Q1, 4-6 = Q2, etc.
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: "$_id.year",
+            quarter: "$_id.quarter"
+          },
+          uniquePatients: { $sum: 1 }
+        }
+      },
+      {
+        $sort: {
+          "_id.year": 1,
+          "_id.quarter": 1
+        }
+      }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      totalUniquePatients: uniquePatients.length,
+      quarterlyBreakdown: quarterStats.map(q => ({
+        year: q._id.year,
+        quarter: `Q${q._id.quarter}`,
+        patients: q.uniquePatients
+      }))
+    });
+  } catch (error) {
+    console.error("Error fetching patient stats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
+exports.getOnlineConsultsForCurrentMonth = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    const onlineConsults = await Appointment.find({
+      appointmentType: "video",
+      date: {
+        $gte: startOfMonth,
+        $lte: endOfMonth
+      },
+      doctor: doctorId,
+    }); 
+
+    res.status(200).json({
+      success: true,
+      count: onlineConsults.length,
+      data: onlineConsults
+    });
+  } catch (error) {
+    console.error("Error fetching online consults:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
+exports.rescheduleAppoinmentByDoctor = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { appointmentId, doctorId, newDate, newStartTime } = req.body;
+
+    const existingAppointment = await Appointment.findById(appointmentId).session(session);
+    if (!existingAppointment) {
+      return res.status(404).send({ error: `Appointment not found with ID: ${appointmentId}` });
+    }
+
+    if (existingAppointment.doctor.toString() !== doctorId) {
+      return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
+    }
+
+    // Check doctor availability
+    const availability = await Availability.findOne({ doctor: doctorId }).session(session);
+    if (!availability) {
+      throw new Error("Doctor availability not found");
+    }
+
+    const appointmentDate = new Date(newDate);
+    if (isNaN(appointmentDate.getTime())) {
+      return res.status(400).send({ error: "Invalid date format" });
+    }
+
+    // Check slot availability
+    const availableSlots = availability.getAvailableSlotsForDate(appointmentDate);
+    const type = existingAppointment.appointmentType;
+    if (!availableSlots[type] || !availableSlots[type].slots.includes(newStartTime)) {
+      return res.status(400).send({ error: `Slot ${newStartTime} not available for ${type} consultation` });
+    }
+
+    // Create new appointment
+    const newAppointment = new Appointment({
+      patient: existingAppointment.patient,
+      doctor: doctorId,
+      appointmentType: type,
+      date: appointmentDate,
+      slot: {
+        startTime: newStartTime,
+        endTime: calculateEndTime(newStartTime, availability.slotDuration || 20),
+      },
+      reason: existingAppointment.reason || "",
+      payment: existingAppointment.payment,
+      rescheduledFrom: existingAppointment._id,
+      videoConferenceLink: existingAppointment.videoConferenceLink,
+      status: "confirmed"
+    });
+
+    // Save new appointment
+    await newAppointment.save({ session });
+
+    // Mark old appointment as rescheduled
+    existingAppointment.status = "rescheduled";
+    await existingAppointment.save({ session });
+
+    // Update related data
+    await availability.bookSlot(
+      appointmentDate.toISOString().split('T')[0],
+      newAppointment.slot,
+      type,
+      newAppointment._id
+    );
+
+    await Payment.findByIdAndUpdate(existingAppointment.payment, { appointment: newAppointment._id }).session(session);
+    await UpcomingEarnings.findOneAndUpdate({ payment: existingAppointment.payment }, { appointment: newAppointment._id }).session(session);
+
+    await availability.save({ session });
+
+    await session.commitTransaction();
+
+    res.status(201).json({
+      success: true,
+      data: newAppointment,
+      message: "Appointment rescheduled successfully"
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("Error in rescheduleAppoinmentByDoctor:", error);
+    res.status(500).send({ error: "Internal server error" });
+  } finally {
+    session.endSession();
+  }
+};
+
 

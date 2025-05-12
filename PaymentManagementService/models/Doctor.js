@@ -259,6 +259,16 @@ const doctorSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: false
+  },
+
+  averageRating: {
+    type: Number,
+    default: 0
+  },
+
+  totalRatings: {
+    type: Number,
+    default: 0
   }
 });
 

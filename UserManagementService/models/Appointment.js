@@ -36,13 +36,17 @@ const appointmentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ["pending", "confirmed", "completed", "cancelled", "no_show"],
+    enum: ["pending", "confirmed", "completed", "cancelled", "no_show", "rescheduled"],
     default: "pending"
   },
   payment: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Payment"
-  },  
+  }, 
+  rescheduledFrom: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Appointment"
+  }, 
   medicalRecords: [{
     type: {
       type: String,
@@ -160,6 +164,28 @@ appointmentSchema.post('save', async function(doc) {
     }
   }
 });
+
+// Post-update hook to check for completion and process earning
+appointmentSchema.post('findOneAndUpdate', async function(doc) {
+  if (doc && doc.status === "completed") {
+    const UpcomingEarnings = mongoose.model("UpcomingEarnings");
+
+    try {
+      const earning = await UpcomingEarnings.findOne({
+        appointment: doc._id,
+        status: "pending"
+      });
+
+      if (earning) {
+        await earning.processEarning();
+        console.log(`Processed earnings for appointment: ${doc._id}`);
+      }
+    } catch (error) {
+      console.error(`Failed to process earnings for appointment ${doc._id}:`, error);
+    }
+  }
+});
+
 
 // Virtual for appointment duration
 appointmentSchema.virtual('duration').get(function() {
