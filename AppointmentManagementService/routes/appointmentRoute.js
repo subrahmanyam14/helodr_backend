@@ -50,4 +50,20 @@ appointmentRouter.get('/appoinments/online-consults/:doctorId', appointmentContr
 
 appointmentRouter.post('/reschedule/appoinment', appointmentController.rescheduleAppoinmentByDoctor);
 
+appointmentRouter.get('/statistics/appoinments', protect, appointmentController.getDoctorAppointmentStatistics);
+
+appointmentRouter.get('/statistics/graph', protect, appointmentController.getDoctorAppointmentsStaticsForGraph);
+
+appointmentRouter.get('/today/upcomming/completed', protect, appointmentController.getCombinedAppointments);
+
+appointmentRouter.get('/statistics/detailed', protect, appointmentController.getDoctorStatisticsDetailed);
+
+appointmentRouter.get('/patient/feedback', protect, appointmentController.getPatientFeedbackMetrics);
+
+appointmentRouter.post('/:id/review', protect, authorize('patient'), appointmentController.submitAppointmentReview);
+
+appointmentRouter.get('/:id/review', protect, authorize('patient'), appointmentController.getAppointmentReview);
+
+appointmentRouter.put('/:id/review', protect, authorize('patient'), appointmentController.updateAppointmentReview);
+
 module.exports = appointmentRouter;

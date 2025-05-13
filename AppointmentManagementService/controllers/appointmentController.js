@@ -948,3 +948,1106 @@ exports.rescheduleAppoinmentByDoctor = async (req, res) => {
 };
 
 
+// Helper function to get start and end of day
+const getTodayRange = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { start: today, end: tomorrow };
+};
+
+exports.getDoctorAppointmentStatistics = async (req, res) => {
+  try {
+    const doctorId = req.user.doctorId;
+
+    console.log("doctorId: ", doctorId);
+
+    const currentDate = new Date();
+    const { start: todayStart, end: todayEnd } = getTodayRange();
+
+    // Get today's appointments
+    const todaysAppointments = await Appointment.countDocuments({
+      doctor: doctorId,
+      date: { 
+        $gte: todayStart,
+        $lt: todayEnd
+      }
+    });
+
+    // Get today's completed appointments
+    const todaysCompleted = await Appointment.countDocuments({
+      doctor: doctorId,
+      status: 'completed',
+      date: { 
+        $gte: todayStart,
+        $lt: todayEnd
+      }
+    });
+
+    // Get clinic appointments count
+    const clinicAppointments = await Appointment.countDocuments({
+      doctor: doctorId,
+      appointmentType: 'clinic',
+      status: { $in: ['confirmed', 'completed'] },
+      date: { $gte: currentDate }
+    });
+
+    // Get online appointments count
+    const onlineAppointments = await Appointment.countDocuments({
+      doctor: doctorId,
+      appointmentType: 'video',
+      status: { $in: ['confirmed', 'completed'] },
+      date: { $gte: currentDate }
+    });
+
+    // Get total confirmed upcoming appointments
+    const confirmedUpcoming = await Appointment.countDocuments({
+      doctor: doctorId,
+      status: 'confirmed',
+      date: { $gte: currentDate }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        todaysAppointments,
+        todaysCompleted,
+        clinicAppointments,
+        onlineAppointments,
+        confirmedUpcoming
+      }
+    });
+
+  } catch (error) {
+    console.log("Error in the getDoctorAppointmentStatistics, ", error);
+    res.status(500).send({error: "Internal server error..."});
+  }
+};
+
+const getDateRanges = () => {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-indexed (0-11)
+  
+  // Today's range
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(todayStart);
+  todayEnd.setDate(todayEnd.getDate() + 1);
+  
+  // Current year range
+  const yearStart = new Date(currentYear, 0, 1);
+  const yearEnd = new Date(currentYear + 1, 0, 1);
+  
+  return { todayStart, todayEnd, yearStart, yearEnd, currentMonth, currentYear };
+};
+
+exports.getDoctorAppointmentsStaticsForGraph = async (req, res) => {
+  try {
+    const doctorId = req.user.doctorId;
+
+    const { todayStart, todayEnd, yearStart, yearEnd, currentMonth, currentYear } = getDateRanges();
+    const currentDate = new Date();
+
+    // Generate monthly ranges only up to current month
+    const monthlyRanges = [];
+    for (let month = 0; month <= currentMonth; month++) {
+      const start = new Date(currentYear, month, 1);
+      const end = new Date(currentYear, month + 1, 1);
+      monthlyRanges.push({
+        name: start.toLocaleString('default', { month: 'short' }),
+        start,
+        end
+      });
+    }
+
+    // Get all statistics in parallel
+    const [
+      todaysAppointments,
+      todaysCompleted,
+      yearlyCompleted,
+      clinicAppointments,
+      onlineAppointments,
+      confirmedUpcoming,
+      monthlyStats,
+      yearlyReviewStats
+    ] = await Promise.all([
+      // Today's appointments
+      Appointment.countDocuments({
+        doctor: doctorId,
+        date: { $gte: todayStart, $lt: todayEnd }
+      }),
+      
+      // Today's completed appointments
+      Appointment.countDocuments({
+        doctor: doctorId,
+        status: 'completed',
+        date: { $gte: todayStart, $lt: todayEnd }
+      }),
+      
+      // Yearly completed consultations
+      Appointment.countDocuments({
+        doctor: doctorId,
+        status: 'completed',
+        date: { $gte: yearStart, $lt: yearEnd }
+      }),
+      
+      // Upcoming clinic appointments
+      Appointment.countDocuments({
+        doctor: doctorId,
+        appointmentType: 'clinic',
+        status: { $in: ['confirmed', 'completed'] },
+        date: { $gte: currentDate }
+      }),
+      
+      // Upcoming online appointments
+      Appointment.countDocuments({
+        doctor: doctorId,
+        appointmentType: 'video',
+        status: { $in: ['confirmed', 'completed'] },
+        date: { $gte: currentDate }
+      }),
+      
+      // All confirmed upcoming
+      Appointment.countDocuments({
+        doctor: doctorId,
+        status: 'confirmed',
+        date: { $gte: currentDate }
+      }),
+      
+      // Monthly completed statistics for current year (up to current month)
+      Promise.all(
+        monthlyRanges.map(month => 
+          Appointment.aggregate([
+            {
+              $match: {
+                doctor: new mongoose.Types.ObjectId(doctorId), // Fixed: added 'new'
+                status: 'completed',
+                date: { $gte: month.start, $lt: month.end }
+              }
+            },
+            {
+              $facet: {
+                appointmentTypes: [
+                  {
+                    $group: {
+                      _id: '$appointmentType',
+                      count: { $sum: 1 }
+                    }
+                  },
+                  {
+                    $project: {
+                      _id: 0,
+                      type: '$_id',
+                      count: 1
+                    }
+                  }
+                ],
+                reviews: [
+                  {
+                    $match: {
+                      'review.rating': { $exists: true }
+                    }
+                  },
+                  {
+                    $group: {
+                      _id: null,
+                      averageRating: { $avg: '$review.rating' },
+                      totalReviews: { $sum: 1 },
+                      waitingTimeAvg: { $avg: '$review.aspects.waitingTime' },
+                      knowledgeAvg: { $avg: '$review.aspects.doctorKnowledge' }
+                    }
+                  }
+                ]
+              }
+            }
+          ]).then(results => {
+            const appointmentData = results[0]?.appointmentTypes || [];
+            const reviewData = results[0]?.reviews?.[0] || {};
+            
+            const clinic = appointmentData.find(r => r.type === 'clinic')?.count || 0;
+            const video = appointmentData.find(r => r.type === 'video')?.count || 0;
+            
+            return {
+              month: month.name,
+              appointments: {
+                completedClinic: clinic,
+                completedVideo: video,
+                completedTotal: clinic + video
+              },
+              reviews: {
+                averageRating: reviewData.averageRating ? parseFloat(reviewData.averageRating.toFixed(1)) : 0,
+                totalReviews: reviewData.totalReviews || 0,
+                waitingTimeAvg: reviewData.waitingTimeAvg ? parseFloat(reviewData.waitingTimeAvg.toFixed(1)) : 0,
+                knowledgeAvg: reviewData.knowledgeAvg ? parseFloat(reviewData.knowledgeAvg.toFixed(1)) : 0
+              }
+            };
+          })
+        )
+      ),
+      
+      // Yearly review statistics
+      Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId), // Fixed: added 'new'
+            status: 'completed',
+            'review.rating': { $exists: true },
+            date: { $gte: yearStart, $lt: yearEnd }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: '$review.rating' },
+            totalReviews: { $sum: 1 },
+            waitingTimeAvg: { $avg: '$review.aspects.waitingTime' },
+            knowledgeAvg: { $avg: '$review.aspects.doctorKnowledge' }
+          }
+        }
+      ])
+    ]);
+
+    const yearlyReviewData = yearlyReviewStats[0] || {};
+
+    res.json({
+      success: true,
+      data: {
+        todaysStats: {
+          total: todaysAppointments,
+          completed: todaysCompleted
+        },
+        yearlyStats: {
+          completedConsultations: yearlyCompleted,
+          reviews: {
+            averageRating: yearlyReviewData.averageRating ? parseFloat(yearlyReviewData.averageRating.toFixed(1)) : 0,
+            totalReviews: yearlyReviewData.totalReviews || 0,
+            waitingTimeAvg: yearlyReviewData.waitingTimeAvg ? parseFloat(yearlyReviewData.waitingTimeAvg.toFixed(1)) : 0,
+            knowledgeAvg: yearlyReviewData.knowledgeAvg ? parseFloat(yearlyReviewData.knowledgeAvg.toFixed(1)) : 0
+          }
+        },
+        upcomingStats: {
+          clinic: clinicAppointments,
+          video: onlineAppointments,
+          confirmed: confirmedUpcoming
+        },
+        monthlyStats: monthlyStats
+      }
+    });
+
+  } catch (error) {
+    console.log("Error in getDoctorAppointmentsStaticsForGraph: ", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+exports.getCombinedAppointments = async (req, res) => {
+  try {
+    const doctorId = req.user.doctorId;
+    const currentDate = new Date();
+    
+    // Today's date range
+    const todayStart = new Date(currentDate);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
+    // Common population options
+    const patientPopulate = {
+      path: 'patient',
+      select: 'name email phone gender dateOfBirth profilePicture'
+    };
+
+    // Fetch all data in parallel
+    const [
+      todaysAppointments,
+      todaysCompleted,
+      upcomingAppointments,
+      previousAppointments
+    ] = await Promise.all([
+      // Today's appointments
+      Appointment.find({
+        doctor: doctorId,
+        date: { $gte: todayStart, $lt: todayEnd }
+      })
+      .select("-reminders")
+      .populate(patientPopulate)
+      .sort({ date: 1, 'slot.startTime': 1 }),
+
+      // Today's completed appointments
+      Appointment.find({
+        doctor: doctorId,
+        status: 'completed',
+        date: { $gte: todayStart, $lt: todayEnd }
+      })
+      .select("-reminders")
+      .populate(patientPopulate)
+      .populate('prescription')
+      .sort({ date: 1, 'slot.startTime': 1 }),
+
+      // Upcoming appointments
+      Appointment.find({
+        doctor: doctorId,
+        status: 'confirmed',
+        date: { $gte: currentDate }
+      })
+      .select("-reminders")
+      .populate(patientPopulate)
+      .sort({ date: 1, 'slot.startTime': 1 }),
+
+      // Previous appointments
+      Appointment.find({
+        doctor: doctorId,
+        status: 'completed',
+        date: { $lt: currentDate }
+      })
+      .select("-reminders")
+      .populate(patientPopulate)
+      .populate('prescription')
+      .populate('medicalRecords')
+      .sort({ date: -1, 'slot.startTime': -1 })
+      .limit(100)
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        today: {
+          count: todaysAppointments.length,
+          appointments: todaysAppointments
+        },
+        todayCompleted: {
+          count: todaysCompleted.length,
+          appointments: todaysCompleted
+        },
+        upcoming: {
+          count: upcomingAppointments.length,
+          appointments: upcomingAppointments
+        },
+        previous: {
+          count: previousAppointments.length,
+          appointments: previousAppointments
+        },
+        stats: {
+          todaysTotal: todaysAppointments.length,
+          todaysCompleted: todaysCompleted.length,
+          upcoming: upcomingAppointments.length,
+          previous: previousAppointments.length
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching combined appointments:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+
+// @desc    Get comprehensive doctor statistics with monthly breakdowns
+// @route   GET /doctor/statistics-detailed
+// @access  Private/Doctor
+exports.getDoctorStatisticsDetailed = async (req, res) => {
+  try {
+    const doctorId = req.user.doctorId;
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth();
+
+    // Generate monthly ranges for current year (up to current month)
+    const monthlyRanges = Array.from({ length: currentMonth + 1 }, (_, i) => {
+      const start = new Date(currentYear, i, 1);
+      const end = new Date(currentYear, i + 1, 1);
+      return {
+        name: start.toLocaleString('default', { month: 'short' }),
+        monthNumber: i + 1,
+        start,
+        end
+      };
+    });
+
+    // Main aggregation pipelines
+    const [
+      consultationStats,
+      patientStats,
+      genderStats
+    ] = await Promise.all([
+      // Consultation statistics (yearly and monthly)
+      Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId),
+            status: 'completed',
+            date: { $gte: new Date(currentYear, 0, 1) }
+          }
+        },
+        {
+          $facet: {
+            yearly: [
+              {
+                $group: {
+                  _id: '$appointmentType',
+                  count: { $sum: 1 }
+                }
+              }
+            ],
+            monthly: [
+              {
+                $addFields: {
+                  month: { $month: '$date' }
+                }
+              },
+              {
+                $group: {
+                  _id: {
+                    month: '$month',
+                    type: '$appointmentType'
+                  },
+                  count: { $sum: 1 }
+                }
+              },
+              {
+                $group: {
+                  _id: '$_id.month',
+                  types: {
+                    $push: {
+                      type: '$_id.type',
+                      count: '$count'
+                    }
+                  },
+                  total: { $sum: '$count' }
+                }
+              },
+              { $sort: { _id: 1 } }
+            ]
+          }
+        }
+      ]),
+
+      // Patient statistics (new vs return)
+      Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId),
+            status: 'completed'
+          }
+        },
+        {
+          $group: {
+            _id: '$patient',
+            firstVisit: { $min: '$date' },
+            visitCount: { $sum: 1 },
+            monthsVisited: { $addToSet: { $month: '$date' } }
+          }
+        },
+        {
+          $facet: {
+            totals: [
+              {
+                $group: {
+                  _id: null,
+                  totalPatients: { $sum: 1 },
+                  newPatients: {
+                    $sum: { $cond: [{ $eq: ['$visitCount', 1] }, 1, 0] }
+                  },
+                  returnPatients: {
+                    $sum: { $cond: [{ $gt: ['$visitCount', 1] }, 1, 0] }
+                  }
+                }
+              }
+            ],
+            monthly: [
+              {
+                $unwind: '$monthsVisited'
+              },
+              {
+                $group: {
+                  _id: '$monthsVisited',
+                  newPatients: {
+                    $sum: {
+                      $cond: [
+                        { $and: [
+                          { $eq: [{ $month: '$firstVisit' }, '$monthsVisited'] },
+                          { $eq: ['$visitCount', 1] }
+                        ]}, 
+                        1, 
+                        0
+                      ]
+                    }
+                  },
+                  returnPatients: {
+                    $sum: {
+                      $cond: [
+                        { $and: [
+                          { $eq: [{ $month: '$firstVisit' }, '$monthsVisited'] },
+                          { $gt: ['$visitCount', 1] }
+                        ]}, 
+                        1, 
+                        0
+                      ]
+                    }
+                  }
+                }
+              },
+              { $sort: { _id: 1 } }
+            ]
+          }
+        }
+      ]),
+
+      // Gender statistics
+      Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId),
+            status: 'completed'
+          }
+        },
+        {
+          $lookup: {
+            from: 'patients',
+            localField: 'patient',
+            foreignField: '_id',
+            as: 'patientData'
+          }
+        },
+        {
+          $unwind: '$patientData'
+        },
+        {
+          $addFields: {
+            month: { $month: '$date' }
+          }
+        },
+        {
+          $facet: {
+            totals: [
+              {
+                $group: {
+                  _id: '$patientData.gender',
+                  count: { $sum: 1 }
+                }
+              }
+            ],
+            monthly: [
+              {
+                $group: {
+                  _id: {
+                    month: '$month',
+                    gender: '$patientData.gender'
+                  },
+                  count: { $sum: 1 }
+                }
+              },
+              {
+                $group: {
+                  _id: '$_id.month',
+                  genders: {
+                    $push: {
+                      gender: '$_id.gender',
+                      count: '$count'
+                    }
+                  }
+                }
+              },
+              { $sort: { _id: 1 } }
+            ]
+          }
+        }
+      ])
+    ]);
+
+    // Process consultation data
+    const yearlyConsultations = {
+      online: consultationStats[0].yearly.find(x => x._id === 'video')?.count || 0,
+      offline: consultationStats[0].yearly.find(x => x._id === 'clinic')?.count || 0,
+      total: consultationStats[0].yearly.reduce((sum, x) => sum + x.count, 0)
+    };
+
+    const monthlyConsultations = monthlyRanges.map(month => {
+      const monthData = consultationStats[0].monthly.find(m => m._id === month.monthNumber) || { types: [], total: 0 };
+      return {
+        month: month.name,
+        online: monthData.types.find(t => t.type === 'video')?.count || 0,
+        offline: monthData.types.find(t => t.type === 'clinic')?.count || 0,
+        total: monthData.total
+      };
+    });
+
+    // Process patient data
+    const patientTotals = patientStats[0].totals[0] || {
+      totalPatients: 0,
+      newPatients: 0,
+      returnPatients: 0
+    };
+
+    const monthlyPatients = monthlyRanges.map(month => {
+      const monthData = patientStats[0].monthly.find(m => m._id === month.monthNumber) || {
+        newPatients: 0,
+        returnPatients: 0
+      };
+      return {
+        month: month.name,
+        newPatients: monthData.newPatients,
+        returnPatients: monthData.returnPatients,
+        total: monthData.newPatients + monthData.returnPatients
+      };
+    });
+
+    // Process gender data
+    const genderTotals = {
+      male: genderStats[0].totals.find(g => g._id === 'male')?.count || 0,
+      female: genderStats[0].totals.find(g => g._id === 'female')?.count || 0,
+      total: genderStats[0].totals.reduce((sum, g) => sum + g.count, 0)
+    };
+
+    const monthlyGender = monthlyRanges.map(month => {
+      const monthData = genderStats[0].monthly.find(m => m._id === month.monthNumber) || { genders: [] };
+      return {
+        month: month.name,
+        male: monthData.genders.find(g => g.gender === 'male')?.count || 0,
+        female: monthData.genders.find(g => g.gender === 'female')?.count || 0,
+        total: monthData.genders.reduce((sum, g) => sum + g.count, 0)
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        consultations: {
+          yearly: yearlyConsultations,
+          monthly: monthlyConsultations
+        },
+        patients: {
+          totals: {
+            new: patientTotals.newPatients,
+            return: patientTotals.returnPatients,
+            total: patientTotals.totalPatients
+          },
+          monthly: monthlyPatients
+        },
+        gender: {
+          totals: genderTotals,
+          monthly: monthlyGender
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching detailed statistics:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+exports.getPatientFeedbackMetrics = async (req, res) => {
+  try {
+    const doctorId = req.user.doctorId;
+
+    const [genderMetrics, feedbackStats] = await Promise.all([
+      // Gender-based metrics (wait time, treatment quality, staff friendliness)
+      Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId),
+            status: 'completed',
+            'review.aspects': { $exists: true }
+          }
+        },
+        {
+          $lookup: {
+            from: 'patients', // Assuming your patient collection is named 'patients'
+            localField: 'patient',
+            foreignField: '_id',
+            as: 'patient'
+          }
+        },
+        {
+          $unwind: '$patient'
+        },
+        {
+          $group: {
+            _id: '$patient.gender',
+            count: { $sum: 1 },
+            avgWaitTime: { $avg: '$review.aspects.waitingTime' },
+            avgTreatmentQuality: { $avg: '$review.aspects.treatmentExplanation' },
+            avgStaffFriendliness: { $avg: '$review.aspects.staffCourteousness' }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            gender: '$_id',
+            count: 1,
+            avgWaitTime: { $round: ['$avgWaitTime', 1] },
+            avgTreatmentQuality: { $round: ['$avgTreatmentQuality', 1] },
+            avgStaffFriendliness: { $round: ['$avgStaffFriendliness', 1] }
+          }
+        }
+      ]),
+
+      // General feedback statistics
+      Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId),
+            status: 'completed',
+            'review.rating': { $exists: true }
+          }
+        },
+        {
+          $facet: {
+            ratingDistribution: [
+              {
+                $group: {
+                  _id: '$review.rating',
+                  count: { $sum: 1 }
+                }
+              },
+              { $sort: { _id: 1 } }
+            ],
+            feedbackCount: [
+              { $count: 'total' }
+            ],
+            feedbackWithComments: [
+              {
+                $match: {
+                  'review.feedback': { $exists: true, $ne: '' }
+                }
+              },
+              { $count: 'count' }
+            ],
+            averageRating: [
+              {
+                $group: {
+                  _id: null,
+                  average: { $avg: '$review.rating' }
+                }
+              }
+            ]
+          }
+        },
+        {
+          $project: {
+            ratingDistribution: {
+              $arrayToObject: {
+                $map: {
+                  input: '$ratingDistribution',
+                  as: 'r',
+                  in: {
+                    k: { $toString: '$$r._id' },
+                    v: '$$r.count'
+                  }
+                }
+              }
+            },
+            totalFeedback: { $arrayElemAt: ['$feedbackCount.total', 0] },
+            feedbackWithComments: { $arrayElemAt: ['$feedbackWithComments.count', 0] },
+            averageRating: { $round: [{ $arrayElemAt: ['$averageRating.average', 0] }, 1] }
+          }
+        }
+      ])
+    ]);
+
+    // Process gender metrics
+    const genderResults = {
+      male: genderMetrics.find(g => g.gender === 'male') || {
+        gender: 'male',
+        count: 0,
+        avgWaitTime: 0,
+        avgTreatmentQuality: 0,
+        avgStaffFriendliness: 0
+      },
+      female: genderMetrics.find(g => g.gender === 'female') || {
+        gender: 'female',
+        count: 0,
+        avgWaitTime: 0,
+        avgTreatmentQuality: 0,
+        avgStaffFriendliness: 0
+      },
+      other: genderMetrics.find(g => !['male', 'female'].includes(g.gender)) || {
+        gender: 'other',
+        count: 0,
+        avgWaitTime: 0,
+        avgTreatmentQuality: 0,
+        avgStaffFriendliness: 0
+      }
+    };
+
+    // Process feedback stats
+    const feedbackResults = feedbackStats[0] || {
+      ratingDistribution: {},
+      totalFeedback: 0,
+      feedbackWithComments: 0,
+      averageRating: 0
+    };
+
+    res.json({
+      success: true,
+      data: {
+        genderMetrics: genderResults,
+        feedbackStats: feedbackResults
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in the submitAppointmentReview:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// @desc    Submit a review for a completed appointment
+// @route   POST /appointments/:id/review
+// @access  Private/Patient
+exports.submitAppointmentReview = async (req, res, next) => {
+  try {
+    const appointmentId = req.params.id;
+    const patientId = req.user._id;
+    const {
+      rating,
+      feedback,
+      aspects = {},
+      isAnonymous = false
+    } = req.body;
+
+    // Validate input
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(404).send({
+        success: false,
+        message: 'Please provide a valid rating between 1 and 5'
+      });
+    }
+
+    // Check if appointment exists and belongs to the patient
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      patient: patientId,
+      status: 'completed'
+    });
+
+    if (!appointment) {
+      return res.status(404).send({
+        success: false,
+        message: 'Completed appointment not found or you are not authorized to review this appointment'
+      });
+    }
+
+    // Check if review already exists
+    // if (appointment.review) {
+    //   return res.status(400).send({
+    //     success: false,
+    //     message: 'You have already submitted a review for this appointment'
+    //   });
+    // }
+
+    // Validate aspects if provided
+    const validAspects = {};
+    const aspectFields = [
+      'waitingTime',
+      'staffCourteousness',
+      'doctorKnowledge',
+      'doctorFriendliness',
+      'treatmentExplanation'
+    ];
+
+    aspectFields.forEach(field => {
+      if (aspects[field] && aspects[field] >= 1 && aspects[field] <= 5) {
+        validAspects[field] = aspects[field];
+      }
+    });
+
+    // Create review object
+    const review = {
+      rating,
+      feedback: feedback || undefined,
+      aspects: validAspects,
+      isAnonymous,
+      createdAt: new Date()
+    };
+
+    // Update appointment with review
+    const updatedAppointment = await Appointment.findByIdAndUpdate(
+      appointmentId,
+      { review },
+      { new: true, runValidators: true }
+    ).populate('doctor', 'fullname specialty');
+
+    // The post-save middleware will automatically update the doctor's average rating
+
+    res.status(201).json({
+      success: true,
+      message: 'Thank you for your feedback!',
+      data: {
+        appointment: {
+          id: updatedAppointment._id,
+          date: updatedAppointment.date,
+          doctor: updatedAppointment.doctor
+        },
+        review: {
+          rating: updatedAppointment.review.rating,
+          isAnonymous: updatedAppointment.review.isAnonymous,
+          createdAt: updatedAppointment.review.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching patient feedback metrics:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      message: error.message
+    });
+  }
+};
+
+// @desc    Get a patient's review for an appointment
+// @route   GET /appointments/:id/review
+// @access  Private/Patient
+exports.getAppointmentReview = async (req, res, next) => {
+  try {
+    const appointmentId = req.params.id;
+    const patientId = req.user._id;
+
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      patient: patientId,
+      status: 'completed'
+    }).select('review date doctor');
+
+    if (!appointment) {
+      throw new ErrorHandler(404, 'Appointment not found');
+    }
+
+    if (!appointment.review) {
+      return res.status(200).json({
+        success: true,
+        data: null,
+        message: 'No review submitted for this appointment'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        review: appointment.review,
+        appointmentDate: appointment.date
+      }
+    });
+
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update a patient's review
+// @route   PUT /appointments/:id/review
+// @access  Private/Patient
+exports.updateAppointmentReview = async (req, res, next) => {
+  try {
+    const appointmentId = req.params.id;
+    const patientId = req.user._id;
+    const updateData = req.body;
+
+    // Check if appointment exists and has a review
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      patient: patientId,
+      status: 'completed',
+      review: { $exists: true }
+    });
+
+    if (!appointment) {
+      throw new ErrorHandler(404, 'Review not found or you are not authorized to update this review');
+    }
+
+    // Validate update data
+    const allowedUpdates = [
+      'rating',
+      'feedback',
+      'aspects.waitingTime',
+      'aspects.staffCourteousness',
+      'aspects.doctorKnowledge',
+      'aspects.doctorFriendliness',
+      'aspects.treatmentExplanation'
+    ];
+
+    const updates = {};
+    for (const field in updateData) {
+      if (allowedUpdates.includes(field)) {
+        updates[`review.${field}`] = updateData[field];
+      } else if (field === 'aspects') {
+        for (const aspect in updateData.aspects) {
+          if (allowedUpdates.includes(`aspects.${aspect}`)) {
+            updates[`review.aspects.${aspect}`] = updateData.aspects[aspect];
+          }
+        }
+      }
+    }
+
+    // Add updatedAt timestamp
+    updates['review.updatedAt'] = new Date();
+
+    if (Object.keys(updates).length === 0) {
+      throw new ErrorHandler(400, 'No valid fields to update');
+    }
+
+    // Update the review
+    const updatedAppointment = await Appointment.findByIdAndUpdate(
+      appointmentId,
+      updates,
+      { new: true, runValidators: true }
+    );
+
+    // Update doctor's average rating
+    if (updates['review.rating']) {
+      const doctor = await Doctor.findById(updatedAppointment.doctor);
+      if (doctor) {
+        const reviews = await Appointment.find({
+          doctor: doctor._id,
+          'review.rating': { $exists: true }
+        });
+        
+        const totalRatings = reviews.length;
+        const averageRating = reviews.reduce((sum, appt) => sum + appt.review.rating, 0) / totalRatings;
+        
+        await Doctor.findByIdAndUpdate(doctor._id, {
+          averageRating,
+          totalRatings
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Review updated successfully',
+      data: {
+        review: updatedAppointment.review
+      }
+    });
+
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+
+
+
