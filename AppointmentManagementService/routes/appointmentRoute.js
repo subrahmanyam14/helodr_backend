@@ -17,8 +17,8 @@ appointmentRouter.put('/:id/status', protect, appointmentController.updateAppoin
 
 // Add prescription to appointment
 appointmentRouter.put('/:id/prescription',
-    //  protect, 
-    //  authorize("doctor"),
+     protect, 
+     authorize("doctor"),
       appointmentController.addPrescription);
 
 // Get upcoming video appointments
@@ -39,5 +39,31 @@ appointmentRouter.get( '/doctors/:doctorId/patients/:id',appointmentController.g
 
 //post notes to patient by doctor to patient
 appointmentRouter.post('/patients/:id/notes',appointmentController.addPatientNotes)
+
+appointmentRouter.get('/presentmonth/confirmed/:doctorId', appointmentController.getDoctorConfirmedAppointmentsForCurrentMonth);
+
+appointmentRouter.get('/patient/week/rating/:doctorId', appointmentController.getDoctorWeeklyRating);
+
+appointmentRouter.get('/doctor/totalpateints/:doctorId', appointmentController.getTotalPatientsByDoctor);
+
+appointmentRouter.get('/appoinments/online-consults/:doctorId', appointmentController.getOnlineConsultsForCurrentMonth);
+
+appointmentRouter.post('/reschedule/appoinment', appointmentController.rescheduleAppoinmentByDoctor);
+
+appointmentRouter.get('/statistics/appoinments', protect, appointmentController.getDoctorAppointmentStatistics);
+
+appointmentRouter.get('/statistics/graph', protect, appointmentController.getDoctorAppointmentsStaticsForGraph);
+
+appointmentRouter.get('/today/upcomming/completed', protect, appointmentController.getCombinedAppointments);
+
+appointmentRouter.get('/statistics/detailed', protect, appointmentController.getDoctorStatisticsDetailed);
+
+appointmentRouter.get('/patient/feedback', protect, appointmentController.getPatientFeedbackMetrics);
+
+appointmentRouter.post('/:id/review', protect, authorize('patient'), appointmentController.submitAppointmentReview);
+
+appointmentRouter.get('/:id/review', protect, authorize('patient'), appointmentController.getAppointmentReview);
+
+appointmentRouter.put('/:id/review', protect, authorize('patient'), appointmentController.updateAppointmentReview);
 
 module.exports = appointmentRouter;

@@ -34,7 +34,7 @@ const userSchema = new mongoose.Schema(
       required: [true, "Please enter your mobile number"],
       unique: true,
       validate: {
-        validator: function(v) {
+        validator: function (v) {
           return /^[0-9]{10}$/.test(v);
         },
         message: props => `${props.value} is not a valid phone number!`
@@ -52,7 +52,7 @@ const userSchema = new mongoose.Schema(
     dateOfBirth: {
       type: Date,
       validate: {
-        validator: function(dob) {
+        validator: function (dob) {
           return dob < new Date();
         },
         message: "Date of birth must be in the past"
@@ -80,55 +80,32 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "https://archive.org/download/default_profile/default-avatar.png"
     },
-    addresses: [
-      {
-        addressLine1: String,
-        addressLine2: String,
-        city: String,
-        state: String,
-        country: {
-          type: String,
-          default: "India"
-        },
-        pinCode: String,
-        isDefault: {
-          type: Boolean,
-          default: false
-        }
-      }
-    ],
-    healthRecords: [
-      {
-        recordType: String,
-        fileUrl: String,
-        date: Date,
-        description: String
-      }
-    ],
-    lastLogin: Date,
-    loginHistory: [
-      {
-        ipAddress: String,
-        device: String,
-        timestamp: Date
-      }
-    ],
-    accountStatus: {
+    addressLine1: {
       type: String,
-      enum: ["active", "suspended", "deactivated"],
-      default: "active"
     },
-    otp: {
-      code: String,
-      expiresAt: Date
+    addressLine2: {
+      type: String,
     },
-    referralCode: String,
-    referredBy: {
+    city: {
+      type: String,
+    },
+    state: {
+      type: String,
+    },
+
+    pinCode: {
+      type: String,
+    },
+    country: {
+      type: String,
+      default: "India"
+    },
+    doctorId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
+      ref: "Doctor"
     }
   },
-  { 
+  {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
@@ -136,9 +113,9 @@ const userSchema = new mongoose.Schema(
 );
 
 // Password hashing middleware
-userSchema.pre("save", async function(next) {
+userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
-  
+
   try {
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);
@@ -149,22 +126,22 @@ userSchema.pre("save", async function(next) {
 });
 
 // Password comparison method
-userSchema.methods.comparePassword = async function(candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
 // Virtual for age calculation
-userSchema.virtual("age").get(function() {
+userSchema.virtual("age").get(function () {
   if (!this.dateOfBirth) return null;
   const today = new Date();
   const birthDate = new Date(this.dateOfBirth);
   let age = today.getFullYear() - birthDate.getFullYear();
   const monthDiff = today.getMonth() - birthDate.getMonth();
-  
+
   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
     age--;
   }
-  
+
   return age;
 });
 

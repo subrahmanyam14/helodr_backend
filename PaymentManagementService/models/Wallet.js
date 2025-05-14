@@ -1,7 +1,6 @@
-
-// Wallet.js
 const mongoose = require("mongoose");
 const Transaction = require("./Transaction");
+const Doctor = require("./Doctor");
 
 const WalletSchema = new mongoose.Schema({
     doctor: {
@@ -37,22 +36,28 @@ const WalletSchema = new mongoose.Schema({
 });
 
 // Add method to update wallet balance
-WalletSchema.methods.addFunds = async function(amount, source, description, referenceId, session = null) {
+WalletSchema.methods.addFunds = async function (amount, source, description, referenceId, session = null) {
     if (amount <= 0) {
-        throw new Error('Amount must be positive');
+        throw new Error('addFunds failed: Amount must be positive');
     }
 
-    // Update wallet balance
+    const options = session ? { session } : {};
+
+    // Update wallet
     this.current_balance += amount;
     this.total_earned += amount;
     this.last_payment_date = new Date();
-    
-    const options = session ? { session } : {};
     await this.save(options);
-    
+
+    // Fetch doctor to get user ID for Transaction
+    const doctor = await Doctor.findById(this.doctor).session(session);
+    if (!doctor) {
+        throw new Error('addFunds failed: Doctor not found');
+    }
+
     // Create a transaction record
     await Transaction.createTransaction({
-        user: this.doctor,
+        user: doctor.user,
         type: "doctor_credit",
         amount: amount,
         referenceId: referenceId,
@@ -65,16 +70,16 @@ WalletSchema.methods.addFunds = async function(amount, source, description, refe
 };
 
 // Add method to withdraw funds
-WalletSchema.methods.requestWithdrawal = async function(amount, description) {
+WalletSchema.methods.requestWithdrawal = async function (amount, description) {
     if (amount <= 0) {
-        throw new Error('Amount must be positive');
-    }
-    
-    if (amount > this.current_balance) {
-        throw new Error('Insufficient balance');
+        throw new Error('requestWithdrawal failed: Amount must be positive');
     }
 
-    // Create withdrawal transaction (pending status)
+    if (amount > this.current_balance) {
+        throw new Error('requestWithdrawal failed: Insufficient balance');
+    }
+
+    // Create withdrawal transaction (pending)
     const transaction = await Transaction.createTransaction({
         user: this.doctor,
         type: "withdrawal_request",
@@ -88,44 +93,55 @@ WalletSchema.methods.requestWithdrawal = async function(amount, description) {
 };
 
 // Method to process approved withdrawal
-WalletSchema.methods.processWithdrawal = async function(transactionId, adminNotes) {
-    const transaction = await Transaction.findById(transactionId);
-    
-    if (!transaction || transaction.type !== "withdrawal_request" || transaction.status !== "pending") {
-        throw new Error('Invalid or already processed withdrawal transaction');
+WalletSchema.methods.processWithdrawal = async function (transactionId, adminNotes = "") {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const transaction = await Transaction.findById(transactionId).session(session);
+
+        if (!transaction || transaction.type !== "withdrawal_request" || transaction.status !== "pending") {
+            throw new Error('processWithdrawal failed: Invalid or already processed transaction');
+        }
+
+        if (transaction.amount > this.current_balance) {
+            transaction.status = "failed";
+            transaction.notes += " | Failed: Insufficient balance";
+            await transaction.save({ session });
+            throw new Error('processWithdrawal failed: Insufficient balance');
+        }
+
+        // Update wallet
+        this.current_balance -= transaction.amount;
+        this.total_withdrawn += transaction.amount;
+        this.last_withdrawal_date = new Date();
+        await this.save({ session });
+
+        // Update original transaction
+        transaction.status = "completed";
+        transaction.notes += adminNotes ? ` | ${adminNotes}` : " | Processed successfully";
+        await transaction.save({ session });
+
+        // Log a new "processed" transaction
+        await Transaction.createTransaction({
+            user: this.doctor,
+            type: "withdrawal_processed",
+            amount: transaction.amount,
+            referenceId: transaction._id,
+            referenceType: "Withdrawal",
+            status: "completed",
+            notes: `Withdrawal processed. Reference: ${transaction._id}`
+        }, { session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return transaction;
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        throw error;
     }
-    
-    // Check balance again at time of processing
-    if (transaction.amount > this.current_balance) {
-        transaction.status = "failed";
-        transaction.notes += " | Failed: Insufficient balance";
-        await transaction.save();
-        throw new Error('Insufficient balance');
-    }
-    
-    // Update wallet
-    this.current_balance -= transaction.amount;
-    this.total_withdrawn += transaction.amount;
-    this.last_withdrawal_date = new Date();
-    await this.save();
-    
-    // Update transaction status
-    transaction.status = "completed";
-    transaction.notes += adminNotes ? ` | ${adminNotes}` : " | Processed successfully";
-    await transaction.save();
-    
-    // Create a processed transaction record
-    await Transaction.createTransaction({
-        user: this.doctor,
-        type: "withdrawal_processed",
-        amount: transaction.amount,
-        referenceId: transaction._id,
-        referenceType: "Withdrawal",
-        status: "completed",
-        notes: `Withdrawal processed. Reference: ${transaction._id}`
-    });
-    
-    return transaction;
 };
 
 module.exports = mongoose.model("Wallet", WalletSchema);

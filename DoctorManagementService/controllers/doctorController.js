@@ -206,13 +206,20 @@ const DoctorController = {
         onlineConsultation
       } = req.body;
 
-      // Check if doctor already exists with this user ID
-      const existingDoctor = await Doctor.findOne({ user: req.user.id });
-      if (existingDoctor) {
+      const existingUser = await User.findById(req.user.id);
+      if (!existingUser) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: 'Doctor profile already exists for this user' });
+        return res.status(400).json({ success: false, message: 'User profile not exists for this Doctor.' });
       }
+
+      // // Check if doctor already exists with this user ID
+      // const existingDoctor = await Doctor.findOne({ user: req.user.id });
+      // if (existingDoctor) {
+      //   await session.abortTransaction();
+      //   session.endSession();
+      //   return res.status(400).json({ success: false, message: 'Doctor profile already exists for this user' });
+      // }
 
       // Create new doctor
       const newDoctor = new Doctor({
@@ -250,6 +257,10 @@ const DoctorController = {
       });
 
       await newSettings.save({ session });
+
+      existingUser.doctorId = newDoctor._id;
+      await existingUser.save({ session });
+
 
       await session.commitTransaction();
       session.endSession();

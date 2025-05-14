@@ -45,6 +45,6 @@ router.get("/stats", protect, authorize("admin"), getPaymentStats);
 router.get("/", protect, authorize("admin"), getPayments);
 
 // For testing
-router.post("/dummy-payment", protect, authorize("admin"), createDummyPayment);
+router.post("/dummy-payment", protect, createDummyPayment);
 
 module.exports = router;

@@ -11,13 +11,14 @@ userRouter.post('/verify-mobile', userController.verifyMobileOTP);
 userRouter.post('/resend-otp', userController.resendOTP);
 userRouter.get('/verify-email', userController.verifyEmail);
 userRouter.post('/forgot-password', userController.forgotPassword);
+userRouter.post('/resend-verification-email',userController.sendEmailVerification);
 
 // Protected routes (require authentication)
 userRouter.use(protect); // All routes below this will use the protect middleware
 userRouter.get('/me', userController.getMe);
 userRouter.put('/me', configureFileUpload('profilePicture'), userController.updateProfile);
 // userRouter.post('/sendEmailVerification', userController.updateEmail);
-userRouter.post('/sendEmailVerification',userController.sendEmailVerification);
+
 userRouter.post('/reset-password', userController.resetPassword);
 userRouter.post('/upload-health-record', configureFileUpload('healthRecord'), healthAndLoginStatusController.uploadHealthRecord);
 userRouter.delete('/delete-health-record/:record_id', healthAndLoginStatusController.deleteHealthRecord);

@@ -178,7 +178,7 @@ const verifyRazorpayPayment = async (req, res) => {
     
     // Get the upcoming earning details for response
     const upcomingEarning = await UpcomingEarnings.findById(paymentDoc.upcomingEarning)
-      .populate('doctor', 'name');
+      .populate('fullName');
 
     res.status(200).json({
       success: true,
@@ -214,15 +214,14 @@ const createDummyPayment = async (req, res) => {
     patientId,
     amount
   } = req.body;
-  const baseAmount = parseInt(amount);
-  const gstAmount = Math.round(baseAmount * 18 / 100);
-  const totalAmount = baseAmount + gstAmount;
-  const session = await mongoose.startSession();
-  session.startTransaction();
- 
+
   try {
-    // 1. Create payment record - fixed to use proper session pattern with new document
-    const paymentDoc = new Payment({
+    const baseAmount = parseInt(amount);
+    const gstAmount = Math.round(baseAmount * 18 / 100);
+    const totalAmount = baseAmount + gstAmount;
+
+    // Use the static method to create the payment and handle all related logic
+    const payment = await Payment.createPayment({
       appointment: appointmentId,
       doctor: doctorId,
       patient: patientId,
@@ -236,27 +235,9 @@ const createDummyPayment = async (req, res) => {
         transactionId: razorpay_payment_id,
         referenceId: razorpay_order_id
       }
-    });
-    
-    const payment = await paymentDoc.save({ session });
-    
-    // 2. Process payment to distribute to doctor's wallet
-    const result = await payment.processPayment();
-    
-    // 3. Create patient transaction - fixed session pattern
-    const transactionDoc = new Transaction({
-      user: patientId,
-      type: "appointment_payment",
-      amount: totalAmount,
-      referenceId: payment._id,
-      referenceType: "Payment",
-      status: "completed",
-      notes: `Payment for appointment ${appointmentId}`
-    });
-    
-    await transactionDoc.save({ session });
-    
-    // 4. Create notifications
+    }, new Date()); // Optionally use the appointment date here
+
+    // Create notifications for both patient and doctor
     const notificationDocs = [
       new Notification({
         referenceId: appointmentId,
@@ -271,29 +252,24 @@ const createDummyPayment = async (req, res) => {
         type: "payment"
       })
     ];
-    
-    await Notification.insertMany(notificationDocs, { session });
-    
-    // 5. Update appointment status
+
+    await Notification.insertMany(notificationDocs);
+
+    // Update the appointment status
     await Appointment.findByIdAndUpdate(
       appointmentId,
       { status: "confirmed" },
-      { new: true, runValidators: true, session }
+      { new: true, runValidators: true }
     );
-    
-    await session.commitTransaction();
-    session.endSession();
-    
+
     res.status(200).json({
       success: true,
-      message: "Payment verified and captured successfully",
-      payment: payment,
+      message: "Dummy payment created and processed successfully",
+      payment,
       razorpayOrderId: razorpay_order_id,
       razorpayPaymentId: razorpay_payment_id
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error("Error in createDummyPayment:", error);
     res.status(500).send({
       message: "Internal server error",
@@ -302,6 +278,7 @@ const createDummyPayment = async (req, res) => {
     });
   }
 };
+
 
 // Mark an appointment as completed and process the payment
 const completeAppointment = async (req, res) => {
