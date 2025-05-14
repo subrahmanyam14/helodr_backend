@@ -706,16 +706,6 @@ const DoctorController = {
         });
       }
 
-      // Validate that specializations are from the allowed enum
-      const invalidSpecializations = specializations.filter(spec => !specializationEnum.includes(spec));
-      if (invalidSpecializations.length > 0) {
-        return res.status(400).json({
-          success: false,
-          message: `Invalid specialization(s): ${invalidSpecializations.join(', ')}`,
-          validSpecializations: specializationEnum
-        });
-      }
-
       // Build base query for active doctors
       const query = {
         isActive: true,
