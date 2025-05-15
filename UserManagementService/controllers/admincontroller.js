@@ -4,9 +4,167 @@ const Payment = require("../models/Payment");
 const mongoose = require("mongoose");
 const Doctor = require("../models/Doctor")
 const Review = require("../models/Review");
-const Statistics = require("../models/Statistics");
 const moment = require("moment");
 const Transaction = require("../models/Transaction");
+
+exports.getDashboardData = async (req, res) => {
+  try {
+    const { period = 'day' } = req.query;
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today.setDate(today.getDate() - 30));
+
+    // Fetch all required data in parallel
+    const [
+      appointments,
+      patients,
+      payments,
+      doctors,
+      reviews
+    ] = await Promise.all([
+      Appointment.find().populate('doctor').populate('patient').lean(),
+      User.find({ role: 'patient' }).lean(),
+      Payment.find({ status: 'captured' }).lean(),
+      Doctor.find().populate('user').lean(),
+      Review.find().lean()
+    ]);
+
+    // Calculate metrics
+    const newPatients = patients.filter(p => new Date(p.createdAt) >= thirtyDaysAgo).length;
+    const avgRating = reviews.reduce((sum, r) => sum + r.rating, 0) / (reviews.length || 1);
+    
+    // Process doctors data
+    const processedDoctors = doctors.map(doctor => {
+      const doctorAppointments = appointments.filter(a => a.doctor._id.toString() === doctor._id.toString());
+      const doctorPayments = payments.filter(p => p.doctor.toString() === doctor._id.toString());
+      const doctorReviews = reviews.filter(r => r.doctor.toString() === doctor._id.toString());
+
+      return {
+        id: doctor._id,
+        name: `Dr. ${doctor.user.fullName}`,
+        specialty: doctor.specialization,
+        experience: `${doctor.experience} years experience`,
+        image: doctor.user.profilePhoto,
+        revenue: doctorPayments.reduce((sum, p) => sum + p.amount, 0),
+        appointments: doctorAppointments.length,
+        rating: doctorReviews.reduce((sum, r) => sum + r.rating, 0) / (doctorReviews.length || 1)
+      };
+    }).sort((a, b) => b.revenue - a.revenue).slice(0, 3);
+    function calculateAppointmentFrequency(appointments) {
+      const patientAppointments = {};
+
+      // Count appointments per patient
+      appointments.forEach(appointment => {
+        const patientId = appointment.patient._id.toString();
+        patientAppointments[patientId] = (patientAppointments[patientId] || 0) + 1;
+      });
+
+      // Group by frequency
+      const frequencyCount = {
+        'First Visit': 0,
+        '2-3 Visits': 0,
+        '4-5 Visits': 0,
+        '6+ Visits': 0
+      };
+
+      Object.values(patientAppointments).forEach(count => {
+        if (count === 1) frequencyCount['First Visit']++;
+        else if (count >= 2 && count <= 3) frequencyCount['2-3 Visits']++;
+        else if (count >= 4 && count <= 5) frequencyCount['4-5 Visits']++;
+        else frequencyCount['6+ Visits']++;
+      });
+
+      const totalPatients = Object.keys(patientAppointments).length;
+
+      // Format the data with percentages
+      return Object.entries(frequencyCount).map(([frequency, count]) => ({
+        frequency,
+        count,
+        percentage: `${Math.round((count / totalPatients) * 100)}%`
+      }));
+    }
+
+    // Generate revenue data based on period
+    const revenueData = await generateRevenueDataByPeriod(period, payments);
+
+    const dashboardData = {
+      metrics: {
+        appointments: {
+          total: appointments.length,
+          pending: appointments.filter(a => a.status === 'pending').length,
+          completed: appointments.filter(a => a.status === 'completed').length,
+          cancelled: appointments.filter(a => a.status === 'cancelled').length,
+          growth: calculateGrowth(
+            appointments.filter(a => new Date(a.createdAt) >= thirtyDaysAgo).length,
+            appointments.filter(a => new Date(a.createdAt) < thirtyDaysAgo).length
+          )
+        },
+        patients: {
+          total: patients.length,
+          new: newPatients,
+          returning: patients.length - newPatients,
+          rating: avgRating,
+          revisitRate: calculateRevisitRate(patients.length, newPatients),
+          waitTime: await calculateAverageWaitTime(appointments)
+        },
+        revenue: {
+          total: revenueData.totalRevenue,
+          growth: revenueData.percentChange,
+          chartData: {
+            data: revenueData.data,
+            yAxisLabels: revenueData.yAxisLabels,
+            todayCutoff: period === 'day' ? (new Date().getHours() * (1000 / 24)) + 60 : null
+          }
+        }
+      },
+      topDoctors: processedDoctors,
+      patientAnalytics: {
+        genderDistribution: [
+          { gender: 'Male', count: patients.filter(p => p.gender === 'male').length },
+          { gender: 'Female', count: patients.filter(p => p.gender === 'female').length },
+          { gender: 'Other', count: patients.filter(p => p.gender === 'other').length }
+        ],
+        demographics: [
+          { age: '18-24', count: patients.filter(p => calculateAge(p.dateOfBirth) >= 18 && calculateAge(p.dateOfBirth) <= 24).length },
+          { age: '25-34', count: patients.filter(p => calculateAge(p.dateOfBirth) >= 25 && calculateAge(p.dateOfBirth) <= 34).length },
+          { age: '35-44', count: patients.filter(p => calculateAge(p.dateOfBirth) >= 35 && calculateAge(p.dateOfBirth) <= 44).length },
+          { age: '45+', count: patients.filter(p => calculateAge(p.dateOfBirth) >= 45).length }
+        ],
+        patientSource: [
+          { source: 'Direct', count: patients.filter(p => p.source === 'direct').length },
+          { source: 'Referral', count: patients.filter(p => p.source === 'referral').length },
+          { source: 'Insurance', count: patients.filter(p => p.source === 'insurance').length },
+          { source: 'Online', count: patients.filter(p => p.source === 'online').length },
+          { source: 'Other', count: patients.filter(p => !['direct', 'referral', 'insurance', 'online'].includes(p.source)).length }
+        ],
+        satisfaction: {
+          overall: avgRating,
+          breakdown: [
+            { rating: 5, count: reviews.filter(r => r.rating === 5).length },
+            { rating: 4, count: reviews.filter(r => r.rating === 4).length },
+            { rating: 3, count: reviews.filter(r => r.rating === 3).length },
+            { rating: 2, count: reviews.filter(r => r.rating === 2).length },
+            { rating: 1, count: reviews.filter(r => r.rating === 1).length }
+          ]
+        },
+        appointmentTrends: {
+          labels: generateMonthLabels(6),
+          monthly: generateMonthlyAppointments(appointments, 6)
+        },
+        patientRetention: {
+          labels: generateMonthLabels(6),
+          data: calculateRetentionRates(appointments, patients, 6)
+        },
+        commonIssues: await getCommonIssues(appointments),
+        appointmentFrequency: calculateAppointmentFrequency(appointments)
+      }
+    };
+
+    res.json(dashboardData);
+  } catch (error) {
+    console.error('Dashboard data fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+};
 
 exports.getDashboardOverview = async (req, res) => {
   try {
@@ -1082,7 +1240,7 @@ exports.addAdmin = async (req, res) => {
   }
 };
 
-exports.defaultAdmin = async( ) => {
+exports.defaultAdmin = async () => {
   try {
     const superAdminData = {
       fullName: "Dusanapudi Venkanna Babu",
@@ -1094,13 +1252,12 @@ exports.defaultAdmin = async( ) => {
       isEmailVerified: true
     };
 
-    const saveSuperAdmin = await User.findOne({$or: [{email: superAdminData.email}, {mobileNumber: superAdminData.mobileNumber}]});
-    if(!saveSuperAdmin)
-    {
-      await User.create({...superAdminData});
+    const saveSuperAdmin = await User.findOne({ $or: [{ email: superAdminData.email }, { mobileNumber: superAdminData.mobileNumber }] });
+    if (!saveSuperAdmin) {
+      await User.create({ ...superAdminData });
       console.log("Default superadmin created...");
     }
-    else{
+    else {
       console.log("Default superAdmin already existed...");
     }
 
@@ -1108,3 +1265,211 @@ exports.defaultAdmin = async( ) => {
     console.log("Error in the defaultAdmin: ", error);
   }
 }
+
+// Helper functions
+function calculateGrowth(current, previous) {
+  if (previous === 0) return 0;
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+function calculateRevisitRate(totalPatients, newPatients) {
+  if (totalPatients === 0) return "0%";
+  const returningPatients = totalPatients - newPatients;
+  return Math.round((returningPatients / totalPatients) * 100) + "%";
+}
+
+function calculateRevenueGrowth(currentRevenue, previousRevenue) {
+  if (previousRevenue === 0) return "+0%";
+  const growth = ((currentRevenue - previousRevenue) / previousRevenue) * 100;
+  return (growth >= 0 ? "+" : "") + Math.round(growth) + "%";
+}
+
+function calculateAge(dateOfBirth) {
+  const today = new Date();
+  const birthDate = new Date(dateOfBirth);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+function generateMonthLabels(count) {
+  const months = [];
+  const today = new Date();
+  for (let i = count - 1; i >= 0; i--) {
+    const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    months.push(date.toLocaleString('default', { month: 'short' }));
+  }
+  return months;
+}
+
+function generateMonthlyAppointments(appointments, count) {
+  const monthlyData = [];
+  const today = new Date();
+  for (let i = count - 1; i >= 0; i--) {
+    const startDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const endDate = new Date(today.getFullYear(), today.getMonth() - i + 1, 0);
+    const monthCount = appointments.filter(a => {
+      const appointmentDate = new Date(a.date);
+      return appointmentDate >= startDate && appointmentDate <= endDate;
+    }).length;
+    monthlyData.push(monthCount);
+  }
+  return monthlyData;
+}
+
+function calculateRetentionRates(appointments, patients, count) {
+  const retentionRates = [];
+  const today = new Date();
+  for (let i = count - 1; i >= 0; i--) {
+    const startDate = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const endDate = new Date(today.getFullYear(), today.getMonth() - i + 1, 0);
+    const monthlyPatients = appointments
+      .filter(a => {
+        const appointmentDate = new Date(a.date);
+        return appointmentDate >= startDate && appointmentDate <= endDate;
+      })
+      .map(a => a.patient._id.toString());
+    const uniquePatients = [...new Set(monthlyPatients)];
+    const returningPatients = uniquePatients.filter(patientId => {
+      const patientAppointments = appointments.filter(a =>
+        a.patient._id.toString() === patientId &&
+        new Date(a.date) < startDate
+      );
+      return patientAppointments.length > 0;
+    });
+    const retentionRate = (returningPatients.length / uniquePatients.length) * 100 || 0;
+    retentionRates.push(Math.round(retentionRate));
+  }
+  return retentionRates;
+}
+
+async function getCommonIssues(appointments) {
+  const issueCount = {};
+  appointments.forEach(appointment => {
+    if (appointment.symptoms) {
+      appointment.symptoms.forEach(symptom => {
+        issueCount[symptom] = (issueCount[symptom] || 0) + 1;
+      });
+    }
+  });
+  return Object.entries(issueCount)
+    .map(([issue, count]) => ({ issue, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+}
+
+async function calculateAverageWaitTime(appointments) {
+  if (!appointments.length) return "0 min";
+  const totalWaitTime = appointments.reduce((sum, appt) => {
+    const waitTime = (new Date(appt.startTime) - new Date(appt.scheduledTime)) / (1000 * 60);
+    return sum + (waitTime > 0 ? waitTime : 0);
+  }, 0);
+  return Math.round(totalWaitTime / appointments.length) + " min";
+}
+
+function generateRevenueDataByPeriod(period, payments) {
+  const today = new Date();
+  let data = [];
+  let totalRevenue = 0;
+  let previousPeriodRevenue = 0;
+
+  switch (period) {
+    case 'day':
+      // Generate 24 hourly data points
+      for (let i = 0; i < 24; i++) {
+        const hourStart = new Date(today);
+        hourStart.setHours(i, 0, 0, 0);
+        const hourEnd = new Date(today);
+        hourEnd.setHours(i, 59, 59, 999);
+
+        const hourRevenue = payments
+          .filter(p => {
+            const date = new Date(p.createdAt);
+            return date >= hourStart && date <= hourEnd;
+          })
+          .reduce((sum, p) => sum + p.amount, 0);
+
+        data.push({
+          x: i * (1000 / 24),
+          value: hourRevenue,
+          formattedDate: hourStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          index: i
+        });
+        totalRevenue += hourRevenue;
+      }
+      // Calculate previous day's revenue for percentage change
+      const yesterdayStart = new Date(today);
+      yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+      yesterdayStart.setHours(0, 0, 0, 0);
+      const yesterdayEnd = new Date(yesterdayStart);
+      yesterdayEnd.setHours(23, 59, 59, 999);
+      previousPeriodRevenue = payments
+        .filter(p => new Date(p.createdAt) >= yesterdayStart && new Date(p.createdAt) <= yesterdayEnd)
+        .reduce((sum, p) => sum + p.amount, 0);
+      break;
+
+    case 'week':
+      // Generate 7 daily data points
+      for (let i = 6; i >= 0; i--) {
+        const dayStart = new Date(today);
+        dayStart.setDate(today.getDate() - i);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setHours(23, 59, 59, 999);
+
+        const dayRevenue = payments
+          .filter(p => {
+            const date = new Date(p.createdAt);
+            return date >= dayStart && date <= dayEnd;
+          })
+          .reduce((sum, p) => sum + p.amount, 0);
+
+        data.push({
+          x: (6 - i) * (1000 / 7),
+          value: dayRevenue,
+          formattedDate: dayStart.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' }),
+          index: 6 - i
+        });
+        totalRevenue += dayRevenue;
+      }
+      // Calculate previous week's revenue
+      const lastWeekStart = new Date(today);
+      lastWeekStart.setDate(lastWeekStart.getDate() - 14);
+      lastWeekStart.setHours(0, 0, 0, 0);
+      const lastWeekEnd = new Date(lastWeekStart);
+      lastWeekEnd.setDate(lastWeekEnd.getDate() + 7);
+      previousPeriodRevenue = payments
+        .filter(p => new Date(p.createdAt) >= lastWeekStart && new Date(p.createdAt) <= lastWeekEnd)
+        .reduce((sum, p) => sum + p.amount, 0);
+      break;
+  }
+
+  // Calculate percentage change
+  const percentChange = previousPeriodRevenue > 0
+    ? ((totalRevenue - previousPeriodRevenue) / previousPeriodRevenue) * 100
+    : 0;
+
+  // Calculate y-coordinates for the chart
+  const maxValue = Math.max(...data.map(point => point.value));
+  data = data.map(point => ({
+    ...point,
+    y: maxValue === 0 ? 150 : Math.round(270 - ((point.value / maxValue) * 240) + 30)
+  }));
+
+  // Generate y-axis labels
+  const yAxisLabels = [
+    { value: maxValue, y: 30 },
+    { value: maxValue / 2, y: 150 },
+    { value: 0, y: 270 }
+  ];
+
+  return {
+    data,
+    totalRevenue,
+    percentChange: Math.round(percentChange),
+    yAxisLabels
+  };
+};

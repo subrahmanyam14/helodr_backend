@@ -1,8 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { getDashboardOverview ,getLocationOverview,getAdminDoctors,getPendingDoctors,updateDoctorStatus,
-    getDoctorPerformance,getPatients,getPatientDetails,getFinanceOverview,getFinanceTransactions, addAdmin, addSuperAdmin} = require("../controllers/admincontroller");
+    getDoctorPerformance,getPatients,getPatientDetails,getFinanceOverview,getFinanceTransactions, addAdmin, addSuperAdmin,
+    getDashboardData} = require("../controllers/admincontroller");
 const { protect, authorize } = require("../middleware/authMiddleware"); 
+router.get("/dashboard/", getDashboardData);
 router.get("/dashboard/overview", getDashboardOverview);
 router.get("/dashboard/location-overview", getLocationOverview);
 router.get("/doctors", getAdminDoctors);
