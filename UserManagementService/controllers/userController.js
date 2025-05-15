@@ -8,6 +8,7 @@ const FormData = require('form-data');
 const validator = require('validator');
 const bcrypt = require('bcryptjs');
 const { default: isEmail } = require('validator/lib/isEmail');
+const Doctor = require('../models/Doctor');
 dotenv.config();
 
 const transportStorageServiceUrl = process.env.TRANSPORT_STORAGE_SERVICE_URL;
@@ -74,6 +75,38 @@ exports.login = async (req, res) => {
       },
       { new: true, runValidators: true }
     );
+    const additionData = {};
+    if(user.role === "doctor")
+    {
+      const doctor = await Doctor.findOne({user: user._id});
+      if(!doctor)
+      {
+        additionData.status = "doctor_details_are_not_added_yet";
+        additionData.message = "Please add your doctors details inorder to send the application details to admin for approval.";
+      }
+      else if( doctor.hospitalAffiliations === null)
+      {
+        additionData.status = "add_clinic_or_hospital_details_are_not_added";
+        additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
+      }
+      else if(!doctor.verifiedByAdmin){
+        additionData.status = "Pending_for_admin_approval";
+        additionData.message = "Application was waiting for the approval by admin";
+      }
+      else if(!doctor.verifiedBySuperAdmin){
+        additionData.status = "Pending_for_superadmin_approval";
+        additionData.message = "Application was waiting for the approval by superadmin";
+      }
+      else if( doctor.isActive === false)
+      {
+        additionData.status = "profile_not_in_active_status";
+        additionData.message = "Please contact the admin for the profile to activate";
+      }
+      else{
+        additionData.status = "profile_in_active_status";
+        additionData.message = "No remarks.";
+      }
+    }
  
       await user.save();
 
@@ -86,7 +119,8 @@ exports.login = async (req, res) => {
           countryCode: user.countryCode,
           profilePhoto: user.profilePhoto,
           role: user.role,
-          id: user._id
+          id: user._id,
+          additionData
         },
         token
       });
@@ -412,6 +446,38 @@ exports.verifyMobileOTP = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
+    const additionData = {};
+    if(user.role === "doctor" && decoded.purpose !== 'mobile_verification')
+    {
+      const doctor = await Doctor.findOne({user: user._id});
+      if(!doctor)
+      {
+        additionData.status = "doctor_details_are_not_added_yet";
+        additionData.message = "Please add your doctors details inorder to send the application details to admin for approval.";
+      }
+      else if( doctor.hospitalAffiliations === null)
+      {
+        additionData.status = "add_clinic_or_hospital_details_are_not_added";
+        additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
+      }
+      else if(!doctor.verifiedByAdmin){
+        additionData.status = "Pending_for_admin_approval";
+        additionData.message = "Application was waiting for the approval by admin";
+      }
+      else if(!doctor.verifiedBySuperAdmin){
+        additionData.status = "Pending_for_superadmin_approval";
+        additionData.message = "Application was waiting for the approval by superadmin";
+      }
+      else if( doctor.isActive === false)
+      {
+        additionData.status = "profile_not_in_active_status";
+        additionData.message = "Please contact the admin for the profile to activate";
+      }
+      else{
+        additionData.status = "profile_in_active_status";
+        additionData.message = "No remarks.";
+      }
+    }
 
 
 
@@ -429,7 +495,8 @@ exports.verifyMobileOTP = async (req, res) => {
         role: user.role,
         isMobileVerified: user.isMobileVerified,
         countryCode: user.countryCode,
-        profilePhoto: user.profilePhoto
+        profilePhoto: user.profilePhoto,
+        additionData
       },
       token: authToken
     };
