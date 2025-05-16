@@ -36,7 +36,7 @@ exports.login = async (req, res) => {
     // Find user by email or mobile
     const user = await User.findOne({
       $or: [{ mobileNumber: emailOrMobile }, { email: emailOrMobile }]
-    }).select('password role mobileNumber fullName countryCode isMobileVerified isEmailVerified _id ');
+    }).select('password role mobileNumber fullName countryCode isMobileVerified isEmailVerified _id doctorId');
     // console.log(user);
 
     if (!user) {
@@ -120,7 +120,8 @@ exports.login = async (req, res) => {
           profilePhoto: user.profilePhoto,
           role: user.role,
           id: user._id,
-          additionData
+          additionData,
+          ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
         },
         token
       });
@@ -167,6 +168,7 @@ exports.login = async (req, res) => {
           process.env.JWT_SECRET,
           { expiresIn: '15m' }
         );
+        
 
         return res.status(200).json({
           success: true,
@@ -176,7 +178,8 @@ exports.login = async (req, res) => {
             mobileNumber: user.mobileNumber,
             userId: user._id,
             countryCode: user.countryCode,
-            profilePhoto: user.profilePhoto
+            profilePhoto: user.profilePhoto,
+            ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
           }
         });
 
@@ -585,7 +588,8 @@ exports.verifyEmail = async( req, res ) => {
         isMobileVerified: user.isMobileVerified,
         email: email,
         isEmailVerified: user.isEmailVerified,
-        profilePhoto: user.profilePhoto
+        profilePhoto: user.profilePhoto,
+        ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
       },
       token: authToken
     };
