@@ -13,7 +13,6 @@ exports.getDashboardData = async (req, res) => {
     const today = new Date();
     const thirtyDaysAgo = new Date(today.setDate(today.getDate() - 30));
 
-    // Fetch all required data in parallel
     const [
       appointments,
       patients,
