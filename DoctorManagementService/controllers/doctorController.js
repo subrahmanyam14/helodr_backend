@@ -671,7 +671,7 @@ const DoctorController = {
   // Get doctor profile
   getDoctorProfile: async (req, res) => {
     try {
-      const { doctorId } = req.query;
+      const { doctorId } = req.params;      
 
       const doctor = await Doctor.findById(doctorId)
         .populate('user', 'fullName email gender countryCode mobileNumber profilePhoto age')
