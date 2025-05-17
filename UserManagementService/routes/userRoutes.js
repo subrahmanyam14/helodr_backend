@@ -20,7 +20,8 @@ userRouter.put('/me', configureFileUpload('profilePicture'), userController.upda
 // userRouter.post('/sendEmailVerification', userController.updateEmail);
 
 userRouter.post('/reset-password', userController.resetPassword);
-userRouter.post('/upload-health-record', configureFileUpload('healthRecord'), healthAndLoginStatusController.uploadHealthRecord);
+userRouter.get('/get-health-records', healthAndLoginStatusController.getHealthRecords);
+userRouter.post('/upload-health-record', healthAndLoginStatusController.uploadHealthRecord);
 userRouter.delete('/delete-health-record/:record_id', healthAndLoginStatusController.deleteHealthRecord);
 userRouter.put('/update-health-record/:record_id', healthAndLoginStatusController.updateHealthRecord);
 userRouter.get('/get-login-status', healthAndLoginStatusController.getLoginStatus);

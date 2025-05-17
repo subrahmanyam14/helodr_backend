@@ -10,8 +10,8 @@ const healthRecordSchema = new Schema({
     record_type: { 
         type: String, 
     },
-    file_url: { 
-        type: String
+    file_urls: { 
+        type: [String]
      },
     date: {
         type: Date 
