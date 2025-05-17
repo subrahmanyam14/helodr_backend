@@ -70,4 +70,7 @@ appointmentRouter.put('/:id/review', protect, authorize('patient'), appointmentC
 
 appointmentRouter.get('/patient/activities', protect, authorize('doctor'), appointmentController.getDoctorRecentActivities);
 
+appointmentRouter.get('/doctor/dashboard', protect, authorize('doctor'), appointmentController.dashboard);
+
+appointmentRouter.get('/doctor/appoinments', protect, authorize('doctor'), appointmentController.getAppointmentsByPagination);
 module.exports = appointmentRouter;
