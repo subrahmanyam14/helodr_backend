@@ -650,8 +650,10 @@ exports.addReviewByPatient = async (req, res) => {
 
 exports.getDoctorConfirmedAppointmentsForCurrentMonth = async (req, res) => {
   try {
+
+    // console.log("DoctorId: ",req.user.doctorId);
     // Validate doctor ID
-    if (!mongoose.Types.ObjectId.isValid(req.params.doctorId)) {
+    if (!mongoose.Types.ObjectId.isValid(req.user.doctorId)) {
       return res.status(400).json({
         success: false,
         error: "Invalid doctor ID"
@@ -664,7 +666,7 @@ exports.getDoctorConfirmedAppointmentsForCurrentMonth = async (req, res) => {
     const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     
     const appointments = await Appointment.find({
-      doctor: req.params.doctorId,
+      doctor: req.user.doctorId,
       status: "confirmed",
       date: {
         $gte: firstDayOfMonth,
@@ -698,7 +700,7 @@ exports.getDoctorConfirmedAppointmentsForCurrentMonth = async (req, res) => {
 };
 
 exports.getDoctorWeeklyRating = async (req, res) => {
-  const { doctorId } = req.params;
+  const { doctorId } = req.user;
 
   try {
     // Validate doctorId
@@ -763,7 +765,7 @@ exports.getDoctorWeeklyRating = async (req, res) => {
 };
 
 exports.getTotalPatientsByDoctor = async (req, res) => {
-  const { doctorId } = req.params;
+  const { doctorId } = req.user;
 
   if (!mongoose.Types.ObjectId.isValid(doctorId)) {
     return res.status(400).json({ success: false, message: "Invalid doctor ID" });
@@ -831,7 +833,7 @@ exports.getTotalPatientsByDoctor = async (req, res) => {
 
 exports.getOnlineConsultsForCurrentMonth = async (req, res) => {
   try {
-    const { doctorId } = req.params;
+    const { doctorId } = req.user;
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
@@ -843,7 +845,7 @@ exports.getOnlineConsultsForCurrentMonth = async (req, res) => {
         $lte: endOfMonth
       },
       doctor: doctorId,
-    }); 
+  }).select("-reminders"); 
 
     res.status(200).json({
       success: true,
@@ -852,6 +854,99 @@ exports.getOnlineConsultsForCurrentMonth = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching online consults:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
+exports.getDoctorDashboardStats = async (req, res) => {
+  const { doctorId } = req.user;
+
+  if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+    return res.status(400).json({ success: false, message: "Invalid doctor ID" });
+  }
+
+  try {
+    const now = new Date();
+
+    // Month Start & End
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    // Week Start & End (Sunday - Saturday)
+    const dayOfWeek = now.getDay(); // 0 = Sunday
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - dayOfWeek);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    // ---------- PARALLEL PROMISES ----------
+
+    const [
+      confirmedAppointments,
+      weeklyRatings,
+      uniquePatients,
+      onlineConsults
+    ] = await Promise.all([
+      // Confirmed Appointments (Current Month)
+      Appointment.countDocuments({
+        doctor: doctorId,
+        status: "confirmed",
+        date: { $gte: firstDayOfMonth, $lte: lastDayOfMonth }
+      }),
+
+      // Weekly Ratings
+      Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId),
+            "review.rating": { $exists: true },
+            "review.createdAt": { $gte: startOfWeek, $lte: endOfWeek }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: "$review.rating" },
+            totalReviews: { $sum: 1 }
+          }
+        }
+      ]),
+
+      // Total Unique Patients (Lifetime)
+      Appointment.distinct("patient", { doctor: doctorId }),
+
+      // Online Consultations (Current Month)
+      Appointment.countDocuments({
+        doctor: doctorId,
+        appointmentType: "video",
+        date: { $gte: firstDayOfMonth, $lte: lastDayOfMonth }
+      })
+    ]);
+
+    // Extract rating data
+    const ratingData = weeklyRatings[0] || { averageRating: null, totalReviews: 0 };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        confirmedAppointmentsThisMonth: confirmedAppointments,
+        averageWeeklyRating: ratingData.averageRating ? ratingData.averageRating.toFixed(2) : null,
+        totalReviewsThisWeek: ratingData.totalReviews,
+        totalUniquePatients: uniquePatients.length,
+        onlineConsultationsThisMonth: onlineConsults
+      },
+      currentMonth: now.toLocaleString('default', { month: 'long' }),
+      currentYear: now.getFullYear()
+    });
+
+  } catch (error) {
+    console.error("Error fetching doctor dashboard stats:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -1974,7 +2069,7 @@ exports.updateAppointmentReview = async (req, res, next) => {
     });
 
     if (!appointment) {
-      throw new ErrorHandler(404, 'Review not found or you are not authorized to update this review');
+      return res.status(404).send({error: 'Review not found or you are not authorized to update this review'});
     }
 
     // Validate update data
@@ -2044,6 +2139,68 @@ exports.updateAppointmentReview = async (req, res, next) => {
 
   } catch (error) {
     next(error);
+  }
+};
+
+
+exports.getDoctorRecentActivities = async (req, res) => {
+  try {
+    const doctorId = req.user.doctorId;
+
+    if (!doctorId) {
+      return res.status(400).json({ success: false, message: "Doctor ID is required" });
+    }
+
+    // Fetch latest updated appointments for this doctor
+    const recentAppointments = await Appointment.find({ doctor: doctorId })
+      .sort({ updatedAt: -1 }) // latest updated first
+      .limit(20) // adjust limit as needed
+      .populate("patient", "fullName");
+
+    const activities = [];
+
+    recentAppointments.forEach((appointment) => {
+      let latestActivity = null;
+
+      // Prioritize what you consider "last updated" activity
+      if (appointment.status === "confirmed") {
+        latestActivity = "Appointment confirmed";
+      }
+
+      if (appointment.prescription && appointment.prescription.medicines.length > 0) {
+        latestActivity = "Prescription updated";
+      }
+
+      if (appointment.medicalRecords && appointment.medicalRecords.length > 0) {
+        latestActivity = "Medical records updated";
+      }
+      
+      if (appointment.rescheduledFrom !== null) {
+        latestActivity = "Appoinment is rescheduled";
+      }
+
+      if (latestActivity) {
+        activities.push({
+          _id: appointment._id,
+          patientId: appointment.patient?._id || null,
+          patientName: appointment.patient?.fullName || null,
+          description: latestActivity,
+          timestamp: appointment.updatedAt
+        });
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: activities
+    });
+
+  } catch (error) {
+    console.error("Error fetching doctor recent activities:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch recent activities"
+    });
   }
 };
 

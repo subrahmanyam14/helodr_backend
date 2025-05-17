@@ -40,13 +40,15 @@ appointmentRouter.get( '/doctors/:doctorId/patients/:id',appointmentController.g
 //post notes to patient by doctor to patient
 appointmentRouter.post('/patients/:id/notes',appointmentController.addPatientNotes)
 
-appointmentRouter.get('/presentmonth/confirmed/:doctorId', appointmentController.getDoctorConfirmedAppointmentsForCurrentMonth);
+appointmentRouter.get('/presentmonth/confirmed', protect, authorize('doctor'), appointmentController.getDoctorConfirmedAppointmentsForCurrentMonth);
 
-appointmentRouter.get('/patient/week/rating/:doctorId', appointmentController.getDoctorWeeklyRating);
+appointmentRouter.get('/patient/week/rating', protect, authorize('doctor'), appointmentController.getDoctorWeeklyRating);
 
-appointmentRouter.get('/doctor/totalpateints/:doctorId', appointmentController.getTotalPatientsByDoctor);
+appointmentRouter.get('/doctor/totalpatients', protect, authorize('doctor'), appointmentController.getTotalPatientsByDoctor);
 
-appointmentRouter.get('/appoinments/online-consults/:doctorId', appointmentController.getOnlineConsultsForCurrentMonth);
+appointmentRouter.get('/doctor/dashboard-statics', protect, authorize('doctor'), appointmentController.getDoctorDashboardStats);
+
+appointmentRouter.get('/appoinments/online-consults',  protect, authorize('doctor'),  appointmentController.getOnlineConsultsForCurrentMonth);
 
 appointmentRouter.post('/reschedule/appoinment', appointmentController.rescheduleAppoinmentByDoctor);
 
@@ -65,5 +67,7 @@ appointmentRouter.post('/:id/review', protect, authorize('patient'), appointment
 appointmentRouter.get('/:id/review', protect, authorize('patient'), appointmentController.getAppointmentReview);
 
 appointmentRouter.put('/:id/review', protect, authorize('patient'), appointmentController.updateAppointmentReview);
+
+appointmentRouter.get('/patient/activities', protect, authorize('doctor'), appointmentController.getDoctorRecentActivities);
 
 module.exports = appointmentRouter;
