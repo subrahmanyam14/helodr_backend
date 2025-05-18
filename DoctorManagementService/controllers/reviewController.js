@@ -1,4 +1,3 @@
-const Review = require('../models/Review');
 const Appointment = require('../models/Appointment');
 const Notification = require('../models/Notification');
 const mongoose = require('mongoose');
@@ -32,11 +31,7 @@ const submitReview = async (req, res) => {
     }
 
     // Check if review already exists for this appointment
-    const existingReview = await Review.findOne({
-      appointment: appointmentId
-    }).session(session);
-
-    if (existingReview) {
+    if (appointment.review && appointment.review.rating) {
       await session.abortTransaction();
       return res.status(400).json({
         success: false,
@@ -44,22 +39,15 @@ const submitReview = async (req, res) => {
       });
     }
 
-    // Create review
-    const review = await Review.create([{
-      appointment: appointmentId,
-      patient: patientId,
-      doctor: appointment.doctor,
-      hospital: appointment.hospital,
+    // Create review within appointment
+    appointment.review = {
       rating,
       feedback,
       aspects,
       isAnonymous,
-      status: 'pending', // Default status, can be moderated later
-      isVerifiedConsultation: true // Since it comes from a real appointment
-    }], { session });
+      createdAt: new Date()
+    };
 
-    // Update appointment with review reference
-    appointment.review = review[0]._id;
     await appointment.save({ session });
 
     // Create notification for doctor
@@ -67,14 +55,14 @@ const submitReview = async (req, res) => {
       user: appointment.doctor,
       type: 'new_review',
       message: `You received a new ${rating}-star rating from a patient`,
-      referenceId: review[0]._id
+      referenceId: appointment._id
     }], { session });
 
     await session.commitTransaction();
 
     res.status(201).json({
       success: true,
-      data: review[0]
+      data: appointment
     });
   } catch (error) {
     await session.abortTransaction();
@@ -100,32 +88,42 @@ const getDoctorReviews = async (req, res) => {
     const { page = 1, limit = 10, rating } = req.query;
     const skip = (page - 1) * limit;
 
-    let query = { doctor: doctorId, status: 'approved' };
+    let query = { 
+      doctor: doctorId, 
+      status: 'completed',
+      'review.rating': { $exists: true }
+    };
 
     // Filter by rating if provided
     if (rating) {
-      query.rating = parseInt(rating);
+      query['review.rating'] = parseInt(rating);
     }
 
-    const reviews = await Review.find(query)
+    const appointmentsWithReviews = await Appointment.find(query)
       .populate('patient', 'fullName profilePhoto')
-      .sort({ createdAt: -1 })
+      .sort({ 'review.createdAt': -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
-    const total = await Review.countDocuments(query);
+    const total = await Appointment.countDocuments(query);
 
-    // Calculate average rating
-    const stats = await Review.aggregate([
-      { $match: { doctor: mongoose.Types.ObjectId(doctorId), status: 'approved' } },
+    // Calculate average rating and stats
+    const stats = await Appointment.aggregate([
+      { 
+        $match: { 
+          doctor: mongoose.Types.ObjectId(doctorId), 
+          status: 'completed',
+          'review.rating': { $exists: true }
+        } 
+      },
       { 
         $group: {
           _id: null,
-          averageRating: { $avg: '$rating' },
+          averageRating: { $avg: '$review.rating' },
           totalReviews: { $sum: 1 },
           ratingCounts: {
             $push: {
-              rating: '$rating',
+              rating: '$review.rating',
               count: 1
             }
           }
@@ -162,6 +160,21 @@ const getDoctorReviews = async (req, res) => {
       }
     ]);
 
+    // Transform appointments to reviews format for response
+    const reviews = appointmentsWithReviews.map(appt => ({
+      _id: appt._id,
+      appointment: appt._id,
+      patient: appt.patient,
+      doctor: appt.doctor,
+      hospital: appt.hospital,
+      rating: appt.review.rating,
+      feedback: appt.review.feedback,
+      aspects: appt.review.aspects,
+      isAnonymous: appt.review.isAnonymous,
+      createdAt: appt.review.createdAt,
+      status: 'approved' // Since we're only querying completed appointments with reviews
+    }));
+
     res.status(200).json({
       success: true,
       data: reviews,
@@ -194,20 +207,41 @@ const getPatientReviews = async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
     const skip = (page - 1) * limit;
 
-    const reviews = await Review.find({ patient: patientId })
-      .populate('doctor', 'user')
-      .populate({
-        path: 'doctor',
-        populate: {
-          path: 'user',
-          select: 'fullName profilePhoto'
-        }
-      })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    const appointmentsWithReviews = await Appointment.find({ 
+      patient: patientId,
+      'review.rating': { $exists: true }
+    })
+    .populate('doctor', 'user')
+    .populate({
+      path: 'doctor',
+      populate: {
+        path: 'user',
+        select: 'fullName profilePhoto'
+      }
+    })
+    .sort({ 'review.createdAt': -1 })
+    .skip(skip)
+    .limit(parseInt(limit));
 
-    const total = await Review.countDocuments({ patient: patientId });
+    const total = await Appointment.countDocuments({ 
+      patient: patientId,
+      'review.rating': { $exists: true }
+    });
+
+    // Transform appointments to reviews format for response
+    const reviews = appointmentsWithReviews.map(appt => ({
+      _id: appt._id,
+      appointment: appt._id,
+      patient: appt.patient,
+      doctor: appt.doctor,
+      hospital: appt.hospital,
+      rating: appt.review.rating,
+      feedback: appt.review.feedback,
+      aspects: appt.review.aspects,
+      isAnonymous: appt.review.isAnonymous,
+      createdAt: appt.review.createdAt,
+      status: 'approved'
+    }));
 
     res.status(200).json({
       success: true,
@@ -240,13 +274,24 @@ const updateReview = async (req, res) => {
     const patientId = req.user.id;
     const { rating, feedback, aspects, isAnonymous } = req.body;
 
-    const review = await Review.findOneAndUpdate(
-      { _id: id, patient: patientId },
-      { rating, feedback, aspects, isAnonymous, status: 'pending' }, // Reset status for moderation
+    const appointment = await Appointment.findOneAndUpdate(
+      { 
+        _id: id, 
+        patient: patientId,
+        'review.rating': { $exists: true }
+      },
+      { 
+        $set: {
+          'review.rating': rating,
+          'review.feedback': feedback,
+          'review.aspects': aspects,
+          'review.isAnonymous': isAnonymous
+        } 
+      },
       { new: true, runValidators: true }
     );
 
-    if (!review) {
+    if (!appointment) {
       return res.status(404).json({
         success: false,
         message: 'Review not found'
@@ -255,7 +300,7 @@ const updateReview = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: review
+      data: appointment
     });
   } catch (error) {
     console.error('Update review error:', error);
@@ -280,25 +325,25 @@ const deleteReview = async (req, res) => {
     const { id } = req.params;
     const patientId = req.user.id;
 
-    // Find and delete review
-    const review = await Review.findOneAndDelete({
-      _id: id,
-      patient: patientId
-    }).session(session);
+    // Find and remove review from appointment
+    const appointment = await Appointment.findOneAndUpdate(
+      { 
+        _id: id,
+        patient: patientId
+      },
+      { 
+        $unset: { review: 1 } 
+      },
+      { new: true, session }
+    );
 
-    if (!review) {
+    if (!appointment) {
       await session.abortTransaction();
       return res.status(404).json({
         success: false,
-        message: 'Review not found'
+        message: 'Appointment not found'
       });
     }
-
-    // Remove review reference from appointment
-    await Appointment.updateOne(
-      { _id: review.appointment },
-      { $unset: { review: 1 } }
-    ).session(session);
 
     await session.commitTransaction();
 
