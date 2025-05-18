@@ -7,7 +7,7 @@ const { protect, authorize } = require('../middleware/auth');
 // Base route: /api/availabilities
 
 // Get a single availability by ID
-availabilityRouter.get('/:id', availabilityController.getAvailabilityById);
+availabilityRouter.get('/', protect, authorize('doctor'), availabilityController.getAvailabilityById);
 
 // Get doctor's available slots for a specific date (public)
 availabilityRouter.get('/doctor/:doctorId/slots', availabilityController.getDoctorAvailableSlots);
@@ -38,7 +38,7 @@ availabilityRouter.post(
 
 // Update an existing availability (doctor or admin only)
 availabilityRouter.put(
-  '/:id',
+  '/',
   [
     protect,
     authorize('doctor'),
@@ -61,20 +61,10 @@ availabilityRouter.delete('/:id', [ protect, authorize('doctor') ], availability
 
 // Add an override for a specific date (doctor or admin only)
 availabilityRouter.post(
-  '/:id/override',
+  '/override',
   [
     protect,
     authorize('doctor'),
-    [
-      check('date', 'Valid date is required').isISO8601().toDate(),
-      check('isAvailable', 'isAvailable must be a boolean').isBoolean(),
-      check('shifts', 'Shifts must be an array').optional().isArray(),
-      check('shifts.*.startTime', 'Start time must be valid').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
-      check('shifts.*.endTime', 'End time must be valid').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
-      check('shifts.*.consultationTypes', 'Consultation types must be valid').optional().isArray(),
-      check('shifts.*.consultationTypes.*.type', 'Consultation type must be either clinic or video').optional().isIn(['clinic', 'video']),
-      check('shifts.*.consultationTypes.*.fee', 'Fee must be a positive number').optional().isNumeric().toFloat().isFloat({ min: 0 })
-    ]
   ],
   availabilityController.addOverride
 );

@@ -126,8 +126,8 @@ const doctor = await Doctor.findById(doctorId); // ✅
 // Get availability by ID
 exports.getAvailabilityById = async (req, res) => {
   try {
-    const availability = await Availability.findById(req.params.id)
-      .populate('doctor', 'name specialization');
+    const availability = await Availability.findOne({doctor: req.user.doctorId})
+      .populate('doctor', 'fullName specialization');
     
     if (!availability) {
       return res.status(404).json({
@@ -243,7 +243,7 @@ exports.updateAvailability = async (req, res) => {
       });
     }
     
-    const availabilityToUpdate = await Availability.findById(req.params.id);
+    const availabilityToUpdate = await Availability.findOne({doctor: req.user.doctorId});
     
     if (!availabilityToUpdate) {
       return res.status(404).json({
@@ -333,73 +333,342 @@ exports.deleteAvailability = async (req, res) => {
   }
 };
 
+
+function getDayName(date) {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[new Date(date).getDay()];
+}
+
+// Helper function to compare dates ignoring time
+function isSameDay(date1, date2) {
+  if (!date1 || !date2) return false;
+  const d1 = new Date(date1).toISOString().split('T')[0];
+  const d2 = new Date(date2).toISOString().split('T')[0];
+  return d1 === d2;
+}
 // Add override
+// Add or modify override
 exports.addOverride = async (req, res) => {
   try {
-    const { date, isAvailable, shifts, reason } = req.body;
-    
-    const availability = await Availability.findById(req.params.id);
+    const { 
+      date, 
+      isAvailable, 
+      startTime, 
+      endTime, 
+      consultationTypes, 
+      reason 
+    } = req.body;
+   
+    const availability = await Availability.findOne({doctor: req.user.doctorId});
     if (!availability) {
       return res.status(404).json({
         success: false,
         message: 'Availability not found'
       });
     }
-    
-    // Validate shifts if available
-    if (isAvailable && shifts && shifts.length > 0) {
-      for (const shift of shifts) {
-        if (!shift.consultationTypes || shift.consultationTypes.length === 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Each available shift must have at least one consultation type defined'
-          });
-        }
-      }
-      
-      // Check for overlapping shifts
-      if (shifts.length > 1) {
-        const sortedShifts = [...shifts].sort((a, b) => 
-          a.startTime.localeCompare(b.startTime)
-        );
-        
-        for (let i = 1; i < sortedShifts.length; i++) {
-          if (sortedShifts[i].startTime < sortedShifts[i-1].endTime) {
-            return res.status(400).json({
-              success: false,
-              message: 'Shifts cannot overlap'
-            });
-          }
-        }
-      }
+   
+    // Parse the target date
+    const targetDate = new Date(date);
+    if (isNaN(targetDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format'
+      });
     }
     
-    const targetDate = new Date(date);
+    // Find if there's an existing override for this date
     const existingOverrideIndex = availability.overrides.findIndex(
       o => isSameDay(o.date, targetDate)
     );
     
-    if (existingOverrideIndex !== -1) {
-      availability.overrides[existingOverrideIndex] = {
-        date,
+    let updatedOverride;
+    
+    // If marking as unavailable with specific time range
+    if (!isAvailable && startTime && endTime) {
+      // Fetch the day's original schedule to create a modified version
+      const dayOfWeek = getDayName(targetDate);
+      const daySchedule = availability.schedule.find(s => s.day === dayOfWeek);
+      
+      if (!daySchedule) {
+        return res.status(400).json({
+          success: false,
+          message: 'No schedule found for this day of week'
+        });
+      }
+      
+      // If there's an existing override for this date
+      if (existingOverrideIndex !== -1) {
+        const currentOverride = availability.overrides[existingOverrideIndex];
+        
+        // If the override already marks the day as unavailable, return error
+        if (!currentOverride.isAvailable) {
+          return res.status(400).json({
+            success: false,
+            message: 'This date is already marked as unavailable'
+          });
+        }
+        
+        // Modify the shifts in the existing override to exclude the unavailable time range
+        const updatedShifts = [];
+        
+        for (const shift of currentOverride.shifts) {
+          // If shift ends before unavailable time starts or starts after unavailable time ends
+          if (shift.endTime <= startTime || shift.startTime >= endTime) {
+            updatedShifts.push(shift);
+            continue;
+          }
+          
+          // If unavailable time is in the middle of the shift, split it
+          if (shift.startTime < startTime && shift.endTime > endTime) {
+            // First part of split
+            updatedShifts.push({
+              startTime: shift.startTime,
+              endTime: startTime,
+              consultationTypes: shift.consultationTypes
+            });
+            
+            // Second part of split
+            updatedShifts.push({
+              startTime: endTime,
+              endTime: shift.endTime,
+              consultationTypes: shift.consultationTypes
+            });
+            continue;
+          }
+          
+          // If unavailable time overlaps with start of shift
+          if (shift.startTime < endTime && endTime < shift.endTime) {
+            updatedShifts.push({
+              startTime: endTime,
+              endTime: shift.endTime,
+              consultationTypes: shift.consultationTypes
+            });
+            continue;
+          }
+          
+          // If unavailable time overlaps with end of shift
+          if (shift.startTime < startTime && startTime < shift.endTime) {
+            updatedShifts.push({
+              startTime: shift.startTime,
+              endTime: startTime,
+              consultationTypes: shift.consultationTypes
+            });
+            continue;
+          }
+        }
+        
+        // Update the override
+        updatedOverride = {
+          date: targetDate,
+          isAvailable: true, // Still available, but with updated shifts
+          shifts: updatedShifts,
+          reason: reason || currentOverride.reason
+        };
+      } else {
+        // Create a new override based on the day's schedule
+        const newShifts = [];
+        
+        for (const shift of daySchedule.shifts) {
+          if (!shift.isActive) continue;
+          
+          // If shift ends before unavailable time starts or starts after unavailable time ends
+          if (shift.endTime <= startTime || shift.startTime >= endTime) {
+            newShifts.push({
+              startTime: shift.startTime,
+              endTime: shift.endTime,
+              consultationTypes: shift.consultationTypes
+            });
+            continue;
+          }
+          
+          // If unavailable time is in the middle of the shift, split it
+          if (shift.startTime < startTime && shift.endTime > endTime) {
+            // First part of split
+            newShifts.push({
+              startTime: shift.startTime,
+              endTime: startTime,
+              consultationTypes: shift.consultationTypes
+            });
+            
+            // Second part of split
+            newShifts.push({
+              startTime: endTime,
+              endTime: shift.endTime,
+              consultationTypes: shift.consultationTypes
+            });
+            continue;
+          }
+          
+          // If unavailable time overlaps with start of shift
+          if (shift.startTime < endTime && endTime < shift.endTime) {
+            newShifts.push({
+              startTime: endTime,
+              endTime: shift.endTime,
+              consultationTypes: shift.consultationTypes
+            });
+            continue;
+          }
+          
+          // If unavailable time overlaps with end of shift
+          if (shift.startTime < startTime && startTime < shift.endTime) {
+            newShifts.push({
+              startTime: shift.startTime,
+              endTime: startTime,
+              consultationTypes: shift.consultationTypes
+            });
+            continue;
+          }
+        }
+        
+        updatedOverride = {
+          date: targetDate,
+          isAvailable: true, // Available with modified shifts
+          shifts: newShifts,
+          reason: reason || 'Partial unavailability'
+        };
+      }
+    }
+    // Creating or modifying an available slot
+    else if (isAvailable && startTime && endTime) {
+      // Validate consultation types
+      if (!consultationTypes || consultationTypes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'At least one consultation type must be provided for available slots'
+        });
+      }
+      
+      // Validate each consultation type
+      for (const ct of consultationTypes) {
+        if (!ct.type || !['clinic', 'video'].includes(ct.type)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid consultation type. Must be "clinic" or "video"'
+          });
+        }
+        
+        if (typeof ct.fee !== 'number' || ct.fee < 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Each consultation type must have a valid fee'
+          });
+        }
+        
+        if (ct.maxPatients !== undefined && (typeof ct.maxPatients !== 'number' || ct.maxPatients < 1)) {
+          return res.status(400).json({
+            success: false,
+            message: 'maxPatients must be a positive number'
+          });
+        }
+      }
+      
+      const newShift = {
+        startTime,
+        endTime,
+        consultationTypes
+      };
+      
+      if (existingOverrideIndex !== -1) {
+        const currentOverride = availability.overrides[existingOverrideIndex];
+        
+        // If day is already marked unavailable, change it to available
+        if (!currentOverride.isAvailable) {
+          updatedOverride = {
+            date: targetDate,
+            isAvailable: true,
+            shifts: [newShift],
+            reason: reason || 'Modified to add availability'
+          };
+        } else {
+          // Check for overlapping shifts in existing override
+          const shifts = [...currentOverride.shifts];
+          
+          // Add the new shift
+          shifts.push(newShift);
+          
+          // Sort shifts by start time
+          const sortedShifts = shifts.sort((a, b) => 
+            a.startTime.localeCompare(b.startTime)
+          );
+          
+          // Check for overlaps
+          for (let i = 1; i < sortedShifts.length; i++) {
+            if (sortedShifts[i].startTime < sortedShifts[i-1].endTime) {
+              return res.status(400).json({
+                success: false,
+                message: 'New shift overlaps with existing shifts'
+              });
+            }
+          }
+          
+          updatedOverride = {
+            date: targetDate,
+            isAvailable: true,
+            shifts: sortedShifts,
+            reason: reason || currentOverride.reason
+          };
+        }
+      } else {
+        // Create a new override with the specified shift
+        updatedOverride = {
+          date: targetDate,
+          isAvailable: true,
+          shifts: [newShift],
+          reason: reason || 'Added availability'
+        };
+      }
+    }
+    // Full day overrides (classic behavior)
+    else {
+      // Validate shifts if available and provided
+      const shifts = req.body.shifts || [];
+      if (isAvailable && shifts.length > 0) {
+        for (const shift of shifts) {
+          if (!shift.consultationTypes || shift.consultationTypes.length === 0) {
+            return res.status(400).json({
+              success: false,
+              message: 'Each available shift must have at least one consultation type defined'
+            });
+          }
+        }
+       
+        // Check for overlapping shifts
+        if (shifts.length > 1) {
+          const sortedShifts = [...shifts].sort((a, b) =>
+            a.startTime.localeCompare(b.startTime)
+          );
+         
+          for (let i = 1; i < sortedShifts.length; i++) {
+            if (sortedShifts[i].startTime < sortedShifts[i-1].endTime) {
+              return res.status(400).json({
+                success: false,
+                message: 'Shifts cannot overlap'
+              });
+            }
+          }
+        }
+      }
+     
+      updatedOverride = {
+        date: targetDate,
         isAvailable,
-        shifts: shifts || [],
+        shifts: isAvailable ? shifts : [],
         reason
       };
-    } else {
-      availability.overrides.push({
-        date,
-        isAvailable,
-        shifts: shifts || [],
-        reason
-      });
     }
     
+    // Update or add the override to the availability
+    if (existingOverrideIndex !== -1) {
+      availability.overrides[existingOverrideIndex] = updatedOverride;
+    } else {
+      availability.overrides.push(updatedOverride);
+    }
+   
     await availability.save();
-    
+   
     res.status(200).json({
       success: true,
-      message: 'Override added successfully',
+      message: 'Availability modified successfully',
       data: availability
     });
   } catch (error) {
