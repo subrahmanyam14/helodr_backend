@@ -110,6 +110,19 @@ router.get('/my-profile',
   DoctorController.getDoctorProfile
 );
 
+router.get('/doctor/revenue-summary', 
+  protect,
+  authorize('doctor'),
+  DoctorController.getRevenueSummary
+);
+
+
+router.get('/doctor/coins-collected', 
+  protect,
+  authorize('doctor'),
+  DoctorController.getCoinsCollected
+)
+
 
 
 module.exports = router;

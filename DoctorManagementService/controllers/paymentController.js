@@ -363,6 +363,9 @@ async function sendPaymentNotification(payment, appointment) {
   ]);
 }
 
+
+
+
 module.exports = {
   initiatePayment,
   verifyPayment,
