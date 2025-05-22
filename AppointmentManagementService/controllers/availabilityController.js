@@ -358,6 +358,8 @@ exports.addOverride = async (req, res) => {
       consultationTypes, 
       reason 
     } = req.body;
+
+    console.log("-------------", req.body);
    
     const availability = await Availability.findOne({doctor: req.user.doctorId});
     if (!availability) {
