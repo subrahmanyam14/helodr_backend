@@ -97,6 +97,8 @@ router.put(
 // Get doctor profile route
 router.get(
   '/:doctorId',
+  // protect,
+  // authorize('doctor', 'admin', "superadmin"),
   DoctorController.getDoctorProfile
 );
 
@@ -107,6 +109,19 @@ router.get('/my-profile',
   
   DoctorController.getDoctorProfile
 );
+
+router.get('/doctor/revenue-summary', 
+  protect,
+  authorize('doctor'),
+  DoctorController.getRevenueSummary
+);
+
+
+router.get('/doctor/coins-collected', 
+  protect,
+  authorize('doctor'),
+  DoctorController.getCoinsCollected
+)
 
 
 

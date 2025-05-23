@@ -4,8 +4,10 @@ const BankDetails = require('../models/BankDetails');
 const Settings = require('../models/Settings');
 const Wallet = require('../models/Wallet');
 const Statistics = require('../models/Statistics');
+const Payment = require("../models/Payment");
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const Transaction = require("../models/Transaction");
 const jwt = require('jsonwebtoken');
 
 const specializationEnum = [
@@ -1274,6 +1276,111 @@ const DoctorController = {
       res.status(500).send({
         error: "Internal server error",
         success: false
+      });
+    }
+  },
+
+  getRevenueSummary: async (req, res) => {
+  const { doctorId } = req.user;
+
+  try {
+    const wallet = await Wallet.findOne({ doctor: doctorId });
+    if (!wallet) return res.status(404).json({ error: "Wallet not found" });
+
+    const commissionRate = wallet.commission_rate || 20;
+
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    const calculateRevenue = async (startDate, endDate) => {
+      // Find payments for doctor in date range and status = "captured"
+      const payments = await Payment.find({
+        doctor: doctorId,
+        status: "captured",
+        createdAt: { $gte: startDate, $lt: endDate }
+      }).populate({
+        path: "appointment",
+        select: "status",
+        match: { status: "completed" }  // Only appointments that are completed
+      });
+
+      // Filter payments where appointment was completed
+      const validPayments = payments.filter(p => p.appointment);
+
+      // Sum the doctor's net revenue after commission
+      const gross = validPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const net = gross * (1 - commissionRate / 100);
+      return Math.round(net);
+    };
+
+    const currentRevenue = await calculateRevenue(currentMonthStart, nextMonthStart);
+    const previousRevenue = await calculateRevenue(previousMonthStart, currentMonthStart);
+
+    const growth = previousRevenue > 0
+      ? parseFloat((((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(1))
+      : 0;
+
+    return res.status(200).json({
+      totalRevenue: currentRevenue,
+      previousMonthRevenue: previousRevenue,
+      monthlyGrowth: growth,
+    });
+  } catch (error) {
+    console.error("Revenue summary error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+},
+
+getCoinsCollected: async (req, res) => {
+    try {
+      const doctorId = req.user.doctorId;
+      
+      // Verify doctor exists
+      const doctor = await Doctor.findById(doctorId);
+      if (!doctor) {
+        return res.status(404).json({ success: false, message: 'Doctor not found' });
+      }
+      
+      // Get wallet data
+      const wallet = await Wallet.findOne({ doctor: doctorId });
+      if (!wallet) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'Wallet not found. Please contact support.'
+        });
+      }
+      
+      // Get today's transactions to calculate daily coins
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const dailyTransactions = await Transaction.find({
+        user: doctor.user,
+        type: "doctor_credit",
+        status: "completed",
+        createdAt: { $gte: today }
+      });
+      
+      // Calculate daily coins
+      const dailyCoins = dailyTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+      
+      // Default coin goal (can be customized per doctor in the future)
+      const coinGoal = 150000;
+      
+      return res.status(200).json({
+        success: true,
+        totalCoins: wallet.current_balance,
+        dailyCoins: dailyCoins,
+        coinGoal: coinGoal,
+        totalEarned: wallet.total_earned
+      });
+    } catch (error) {
+      console.error('Error in getCoinsCollected:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'An error occurred while fetching coins data'
       });
     }
   }

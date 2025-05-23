@@ -358,6 +358,8 @@ exports.addOverride = async (req, res) => {
       consultationTypes, 
       reason 
     } = req.body;
+
+    console.log("-------------", req.body);
    
     const availability = await Availability.findOne({doctor: req.user.doctorId});
     if (!availability) {
@@ -547,19 +549,19 @@ exports.addOverride = async (req, res) => {
           });
         }
         
-        if (typeof ct.fee !== 'number' || ct.fee < 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Each consultation type must have a valid fee'
-          });
-        }
+        // if (typeof ct.fee !== 'number' || ct.fee < 0) {
+        //   return res.status(400).json({
+        //     success: false,
+        //     message: 'Each consultation type must have a valid fee'
+        //   });
+        // }
         
-        if (ct.maxPatients !== undefined && (typeof ct.maxPatients !== 'number' || ct.maxPatients < 1)) {
-          return res.status(400).json({
-            success: false,
-            message: 'maxPatients must be a positive number'
-          });
-        }
+        // if (ct.maxPatients !== undefined && (typeof ct.maxPatients !== 'number' || ct.maxPatients < 1)) {
+        //   return res.status(400).json({
+        //     success: false,
+        //     message: 'maxPatients must be a positive number'
+        //   });
+        // }
       }
       
       const newShift = {
