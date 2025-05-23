@@ -97,8 +97,6 @@ router.put(
 // Get doctor profile route
 router.get(
   '/:doctorId',
-  protect,
-  authorize('doctor', 'admin', "superadmin"),
   DoctorController.getDoctorProfile
 );
 
