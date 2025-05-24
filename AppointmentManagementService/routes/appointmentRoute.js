@@ -73,4 +73,6 @@ appointmentRouter.get('/patient/activities', protect, authorize('doctor'), appoi
 appointmentRouter.get('/doctor/dashboard', protect, authorize('doctor'), appointmentController.dashboard);
 
 appointmentRouter.get('/doctor/appoinments', protect, authorize('doctor'), appointmentController.getAppointmentsByPagination);
+
+appointmentRouter.get('/doctor/getLastSixWeeksAppoinmentsTrend', protect, authorize('doctor'), appointmentController.getLastSixWeeksAppointmentsTrend);
 module.exports = appointmentRouter;

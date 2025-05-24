@@ -43,4 +43,19 @@ router.get(
   transactionController.getTransactionStats
 );
 
+router.get(
+  '/transactions/all',
+  protect,
+  authorize( 'doctor'),
+  transactionController.getAllTransactions
+);
+
+
+router.get(
+  '/earings/weeks/months',
+  protect,
+  authorize( 'doctor'),
+  transactionController.getWeekAndMonthEarning
+);
+
 module.exports = router;

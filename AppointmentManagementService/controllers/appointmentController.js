@@ -676,7 +676,7 @@ exports.getDoctorConfirmedAppointmentsForCurrentMonth = async (req, res) => {
     })
       .populate({
         path: "patient",
-        select: "fullName email countryCode mobileNumber gender dateOfBirth" // Include additional patient details
+        select: "fullName email countryCode mobileNumber gender dateOfBirth profilePhoto" // Include additional patient details
       })
       .populate({
         path: "doctor",
@@ -2598,6 +2598,122 @@ async function calculateSatisfactionRate(doctorId) {
     return 95; // Return default value on error
   }
 }
+
+
+
+exports.getLastSixWeeksAppointmentsTrend = async (req, res) => {
+  try {
+    const { doctorId } = req.user;
+    
+    if (!doctorId) {
+      return res.status(400).json({ message: "Doctor ID is required" });
+    }
+
+    // Get current date ranges
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    currentMonthEnd.setHours(23, 59, 59, 999);
+
+    // Get previous month date ranges
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    prevMonthEnd.setHours(23, 59, 59, 999);
+
+    // 1. Get total appointment count
+    const totalAppointments = await Appointment.countDocuments({ doctor: doctorId });
+
+    // 2. Get current and previous month appointment counts
+    const [monthAppointments, prevMonthAppointments] = await Promise.all([
+      Appointment.countDocuments({
+        doctor: doctorId,
+        date: { $gte: currentMonthStart, $lte: currentMonthEnd }
+      }),
+      Appointment.countDocuments({
+        doctor: doctorId,
+        date: { $gte: prevMonthStart, $lte: prevMonthEnd }
+      })
+    ]);
+
+    // 3. Calculate monthly growth rate
+    let monthlyGrowthRate = "0%";
+    if (prevMonthAppointments > 0) {
+      const growth = ((monthAppointments - prevMonthAppointments) / prevMonthAppointments) * 100;
+      monthlyGrowthRate = `${growth >= 0 ? '+' : ''}${growth.toFixed(1)}%`;
+    } else if (monthAppointments > 0) {
+      monthlyGrowthRate = "+100%"; // Handle case where previous month had 0 appointments
+    }
+
+    // 4. Get weekly breakdown for the last 6 weeks
+    const sixWeeksAgo = new Date(now);
+    sixWeeksAgo.setDate(now.getDate() - 42); // 6 weeks * 7 days
+
+    const weeklyAppointments = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctorId,
+          date: { $gte: sixWeeksAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$date" },
+            month: { $month: "$date" },
+            week: { $week: "$date" }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { "_id.year": 1, "_id.month": 1, "_id.week": 1 }
+      },
+      {
+        $limit: 6 // Get last 6 weeks
+      }
+    ]);
+
+    // Format weekly data
+    const appointmentsData = weeklyAppointments.map((week, index) => ({
+      week: `Week ${index + 1}`,
+      count: week.count
+    }));
+
+    // 5. Get additional stats
+    const [statusCounts, appointmentTypes] = await Promise.all([
+      Appointment.aggregate([
+        { $match: { doctor: doctorId } },
+        { $group: { _id: "$status", count: { $sum: 1 } } }
+      ]),
+      Appointment.aggregate([
+        { $match: { doctor: doctorId } },
+        { $group: { _id: "$appointmentType", count: { $sum: 1 } } }
+      ])
+    ]);
+
+    // Format response
+    const response = {
+      totalAppointments,
+      currentMonthAppointments: monthAppointments,
+      monthlyGrowthRate, // Added growth rate
+      appointmentsData,
+      statusDistribution: statusCounts.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {}),
+      typeDistribution: appointmentTypes.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {})
+    };
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error fetching appointment statistics:", error);
+    res.status(500).json({ message: "Error fetching appointment statistics" });
+  }
+};
+
 
 
 
