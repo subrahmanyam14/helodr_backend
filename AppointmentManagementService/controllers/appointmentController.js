@@ -956,23 +956,56 @@ exports.getDoctorDashboardStats = async (req, res) => {
   }
 };
 
-exports.rescheduleAppoinmentByDoctor = async (req, res) => {
+exports.rescheduleAppoinment = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { appointmentId, doctorId, newDate, newStartTime } = req.body;
+    const { appointmentId, newDate, newStartTime } = req.body;
+    const userId = req.user.id;
+    const doctorId = req.user.doctorId;
+    const isDoctor = doctorId ? true : false;
+
+    // Validate input
+    if (!appointmentId || !newDate || !newStartTime) {
+      return res.status(400).send({ error: "appointmentId, newDate, and newStartTime are required" });
+    }
 
     const existingAppointment = await Appointment.findById(appointmentId).session(session);
     if (!existingAppointment) {
       return res.status(404).send({ error: `Appointment not found with ID: ${appointmentId}` });
     }
 
-    if (existingAppointment.doctor.toString() !== doctorId) {
-      return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
+    // Check if the user has permission to reschedule
+    if (isDoctor) {
+      if (existingAppointment.doctor.toString() !== doctorId) {
+        return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
+      }
+    } else {
+      if (existingAppointment.patient.toString() !== userId.toString()) {
+        return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
+      }
+    }
+
+    // Check if the appointment can be rescheduled based on time constraints
+    const now = new Date();
+    const appointmentDateTime = new Date(existingAppointment.date);
+    appointmentDateTime.setHours(parseInt(existingAppointment.slot.startTime.split(':')[0]));
+    appointmentDateTime.setMinutes(parseInt(existingAppointment.slot.startTime.split(':')[1]));
+
+    const timeDifference = (appointmentDateTime - now) / (1000 * 60 * 60); // in hours
+
+    if (isDoctor) {
+      if (timeDifference < 1) {
+        return res.status(400).send({ error: "Doctors can only reschedule appointments at least 1 hour before the appointment time." });
+      }
+    } else {
+      if (timeDifference < 20) {
+        return res.status(400).send({ error: "Patients can only reschedule appointments at least 20 hours before the appointment time." });
+      }
     }
 
     // Check doctor availability
-    const availability = await Availability.findOne({ doctor: doctorId }).session(session);
+    const availability = await Availability.findOne({ doctor: existingAppointment.doctor }).session(session);
     if (!availability) {
       throw new Error("Doctor availability not found");
     }
@@ -984,62 +1017,49 @@ exports.rescheduleAppoinmentByDoctor = async (req, res) => {
 
     // Check slot availability
     const availableSlots = availability.getAvailableSlotsForDate(appointmentDate);
+    console.log(availableSlots);
     const type = existingAppointment.appointmentType;
     if (!availableSlots[type] || !availableSlots[type].slots.includes(newStartTime)) {
       return res.status(400).send({ error: `Slot ${newStartTime} not available for ${type} consultation` });
     }
 
-    // Create new appointment
-    const newAppointment = new Appointment({
-      patient: existingAppointment.patient,
-      doctor: doctorId,
-      appointmentType: type,
-      date: appointmentDate,
-      slot: {
-        startTime: newStartTime,
-        endTime: calculateEndTime(newStartTime, availability.slotDuration || 20),
+    // Update the appointment
+    const updatedAppointment = await Appointment.findByIdAndUpdate(
+      appointmentId,
+      {
+        $set: {
+          date: appointmentDate,
+          'slot.startTime': newStartTime,
+          'slot.endTime': calculateEndTime(newStartTime, availability.slotDuration || 20),
+          status: 'rescheduled'
+        },
+        $push: {
+          rescheduledFrom: {
+            startTime: existingAppointment.slot.startTime,
+            endTime: existingAppointment.slot.endTime,
+            previousDate: existingAppointment.date,
+            rescheduleBy: isDoctor? "doctor" : "patient"
+          }
+        }
       },
-      reason: existingAppointment.reason || "",
-      payment: existingAppointment.payment,
-      rescheduledFrom: existingAppointment._id,
-      videoConferenceLink: existingAppointment.videoConferenceLink,
-      status: "confirmed"
-    });
-
-    // Save new appointment
-    await newAppointment.save({ session });
-
-    // Mark old appointment as rescheduled
-    existingAppointment.status = "rescheduled";
-    await existingAppointment.save({ session });
-
-    // Update related data
-    await availability.bookSlot(
-      appointmentDate.toISOString().split('T')[0],
-      newAppointment.slot,
-      type,
-      newAppointment._id
+      { new: true, session }
     );
 
-    await Payment.findByIdAndUpdate(existingAppointment.payment, { appointment: newAppointment._id }).session(session);
-    await UpcomingEarnings.findOneAndUpdate({ payment: existingAppointment.payment }, { appointment: newAppointment._id }).session(session);
-
-    await availability.save({ session });
+    // Send notification to the other party (patient if doctor rescheduled, or doctor if patient rescheduled)
+    // Implementation depends on your notification system
 
     await session.commitTransaction();
+    session.endSession();
 
-    res.status(201).json({
-      success: true,
-      data: newAppointment,
-      message: "Appointment rescheduled successfully"
+    res.status(200).send({
+      message: "Appointment rescheduled successfully",
+      appointment: updatedAppointment
     });
-
   } catch (error) {
     await session.abortTransaction();
-    console.error("Error in rescheduleAppoinmentByDoctor:", error);
-    res.status(500).send({ error: "Internal server error" });
-  } finally {
     session.endSession();
+    console.log("Error in rescheduleAppointment: ", error);
+    res.status(500).send({ error: "Internal server error..." });
   }
 };
 

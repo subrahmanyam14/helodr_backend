@@ -50,7 +50,7 @@ appointmentRouter.get('/doctor/dashboard-statics', protect, authorize('doctor'),
 
 appointmentRouter.get('/appoinments/online-consults',  protect, authorize('doctor'),  appointmentController.getOnlineConsultsForCurrentMonth);
 
-appointmentRouter.post('/reschedule/appoinment', appointmentController.rescheduleAppoinmentByDoctor);
+appointmentRouter.post('/reschedule/appoinment', protect, appointmentController.rescheduleAppoinment);
 
 appointmentRouter.get('/statistics/appoinments', protect, appointmentController.getDoctorAppointmentStatistics);
 
