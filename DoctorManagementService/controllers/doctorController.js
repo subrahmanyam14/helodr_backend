@@ -182,6 +182,24 @@ const calculateDistance = (coords1, coords2) => {
 };
 
 
+function getDistance(coord1, coord2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = toRad(coord2.lat - coord1.lat);
+  const dLon = toRad(coord2.lng - coord1.lng);
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(toRad(coord1.lat)) * Math.cos(toRad(coord2.lat)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  const distance = R * c;
+  return distance * 1000; // Convert to meters
+}
+
+function toRad(value) {
+  return value * Math.PI / 180;
+}
+
+
 const sanitizeRegex = (str) => {
   if (typeof str !== 'string') return str;
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -205,29 +223,36 @@ const DoctorController = {
         clinicConsultationFee,
         followUpFee,
         services,
-        onlineConsultation
+        onlineConsultation,
+        latitude,
+        longitude
       } = req.body;
 
-      const existingUser = await User.findById(req.user.id);
+      // Validate coordinates
+      if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Valid latitude and longitude are required' 
+        });
+      }
+
+      const existingUser = await User.findById(req.user.id).session(session);
       if (!existingUser) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: 'User profile not exists for this Doctor.' });
+        return res.status(400).json({ 
+          success: false, 
+          message: 'User profile does not exist for this Doctor.' 
+        });
       }
-
-      // // Check if doctor already exists with this user ID
-      // const existingDoctor = await Doctor.findOne({ user: req.user.id });
-      // if (existingDoctor) {
-      //   await session.abortTransaction();
-      //   session.endSession();
-      //   return res.status(400).json({ success: false, message: 'Doctor profile already exists for this user' });
-      // }
 
       // Create new doctor
       const newDoctor = new Doctor({
         user: req.user.id,
         title: title || 'Dr.',
-        specializations: specializations || [], // Changed to array of specializations
+        specializations: specializations || [],
         registrationNumber,
         qualifications: qualifications || [],
         experience: experience || 0,
@@ -236,7 +261,14 @@ const DoctorController = {
         clinicConsultationFee: clinicConsultationFee || 0,
         followUpFee: followUpFee || 0,
         services: services || [],
-        onlineConsultation: onlineConsultation || { isAvailable: false, consultationFee: 0 },
+        onlineConsultation: onlineConsultation || { 
+          isAvailable: false, 
+          consultationFee: 0 
+        },
+        location: {
+          type: "Point",
+          coordinates: [parseFloat(longitude), parseFloat(latitude)]
+        },
         verification: {
           status: 'pending',
           documents: req.files ? req.files.map(file => file.path) : [],
@@ -246,6 +278,73 @@ const DoctorController = {
       });
 
       await newDoctor.save({ session });
+
+      // Cluster assignment logic using geospatial query
+      let assignedCluster = null;
+      
+      // 1. Find clusters that contain this doctor's location within their radius
+      const containingClusters = await Cluster.find({
+        location: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: newDoctor.location.coordinates
+            },
+            $maxDistance: 10000 // Search within 10km radius (adjust as needed)
+          }
+        },
+        isActive: true
+      }).session(session);
+
+      // 2. Check which cluster actually contains the doctor (within its radius)
+      for (const cluster of containingClusters) {
+        const distance = getDistance(
+          { 
+            lat: newDoctor.location.coordinates[1], 
+            lng: newDoctor.location.coordinates[0] 
+          },
+          { 
+            lat: cluster.location.coordinates[1], 
+            lng: cluster.location.coordinates[0] 
+          }
+        );
+        
+        if (distance <= cluster.radius) {
+          assignedCluster = cluster;
+          break;
+        }
+      }
+      
+      // 3. If not in any cluster, find nearest active cluster
+      if (!assignedCluster) {
+        const nearestCluster = await Cluster.findOne({
+          isActive: true
+        })
+        .sort({
+          location: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: newDoctor.location.coordinates
+              }
+            }
+          }
+        })
+        .session(session);
+
+        if (nearestCluster) {
+          assignedCluster = nearestCluster;
+        }
+      }
+      
+      // 4. Add doctor to the assigned cluster if found
+      if (assignedCluster) {
+        // Check if doctor already exists in cluster to prevent duplicates
+        if (!assignedCluster.doctors.includes(req.user.id)) {
+          assignedCluster.doctors.push(req.user.id);
+          await assignedCluster.save({ session });
+        }
+      }
 
       // Create default settings for the doctor
       const newSettings = new Settings({
@@ -260,9 +359,9 @@ const DoctorController = {
 
       await newSettings.save({ session });
 
+      // Update user with doctor reference
       existingUser.doctorId = newDoctor._id;
       await existingUser.save({ session });
-
 
       await session.commitTransaction();
       session.endSession();
@@ -271,12 +370,26 @@ const DoctorController = {
         success: true,
         message: 'Doctor registered successfully',
         doctor: newDoctor,
-        settings: newSettings
+        settings: newSettings,
+        cluster: assignedCluster ? {
+          id: assignedCluster._id,
+          name: assignedCluster.clusterName,
+          distance: assignedCluster ? getDistance(
+            { 
+              lat: newDoctor.location.coordinates[1], 
+              lng: newDoctor.location.coordinates[0] 
+            },
+            { 
+              lat: assignedCluster.location.coordinates[1], 
+              lng: assignedCluster.location.coordinates[0] 
+            }
+          ) : null
+        } : null
       });
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
-      console.log("Error in the resgisterDoctor: ", error);
+      console.error("Error in registerDoctor: ", error);
       res.status(500).json({
         success: false,
         message: 'Error registering doctor',

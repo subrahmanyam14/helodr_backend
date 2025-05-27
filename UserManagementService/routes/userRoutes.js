@@ -26,4 +26,7 @@ userRouter.delete('/delete-health-record/:record_id', healthAndLoginStatusContro
 userRouter.put('/update-health-record/:record_id', healthAndLoginStatusController.updateHealthRecord);
 userRouter.get('/get-login-status', healthAndLoginStatusController.getLoginStatus);
 
+userRouter.use(authorize("superadmin"));
+userRouter.post('/register-admin', userController.registerAdmin);
+
 module.exports = userRouter;
