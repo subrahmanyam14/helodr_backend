@@ -1,4 +1,4 @@
-const { protect } = require('../middleware/authMiddleware');
+const { protect, authorize } = require('../middleware/authMiddleware');
 const express = require('express');
 const userRouter = express.Router();
 const userController = require('../controllers/userController');
@@ -26,7 +26,7 @@ userRouter.delete('/delete-health-record/:record_id', healthAndLoginStatusContro
 userRouter.put('/update-health-record/:record_id', healthAndLoginStatusController.updateHealthRecord);
 userRouter.get('/get-login-status', healthAndLoginStatusController.getLoginStatus);
 
-userRouter.use(authorize("superadmin"));
-userRouter.post('/register-admin', userController.registerAdmin);
+
+userRouter.post('/register-admin', authorize("superadmin"), userController.registerAdmin);
 
 module.exports = userRouter;

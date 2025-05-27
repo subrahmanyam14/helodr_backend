@@ -4,7 +4,7 @@ const clusterController = require('../controllers/clusterController');
 
 router.post('/', clusterController.createCluster);
 router.get('/', clusterController.getAllClusters);
-router.get('/:id', clusterController.getClusterById);
+router.get('/:id', clusterController.getClusterByUserId);
 router.put('/:id', clusterController.updateCluster);
 router.delete('/:id', clusterController.deleteCluster);
 
