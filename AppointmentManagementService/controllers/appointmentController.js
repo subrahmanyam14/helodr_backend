@@ -2992,9 +2992,6 @@ async function calculateSatisfactionRate(doctorId) {
     console.error('Error calculating satisfaction rate:', error);
     return 95; // Return default value on error
   }
-<<<<<<< HEAD
-}
-=======
 }
 
 
@@ -3117,4 +3114,3 @@ exports.getLastSixWeeksAppointmentsTrend = async (req, res) => {
 
 
 
->>>>>>> c059c9914b15544573f6bf61f98ddec982d8c96d
