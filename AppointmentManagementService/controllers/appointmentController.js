@@ -9,7 +9,382 @@ const User = require('../models/User');
 const Statistics = require("../models/Statistics");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 
+// Get consultation statistics for a doctor
+exports.getConsultationStats = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { month, year } = req.query;
 
+    // Validate doctorId
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid doctor ID'
+      });
+    }
+
+    // Build date filter for overview stats
+    let dateFilter = {};
+    const currentYear = year ? parseInt(year) : new Date().getFullYear();
+
+    if (month && year) {
+      // Specific month filter for weekly view
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+      dateFilter = {
+        date: {
+          $gte: startDate,
+          $lte: endDate
+        }
+      };
+    } else if (year) {
+      // Yearly filter for monthly view
+      const startDate = new Date(year, 0, 1);
+      const endDate = new Date(year, 11, 31, 23, 59, 59);
+      dateFilter = {
+        date: {
+          $gte: startDate,
+          $lte: endDate
+        }
+      };
+    }
+
+    // Get overall stats (filtered by year or year+month)
+    const overallStats = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(doctorId),
+          ...dateFilter
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          completed: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'completed'] }, 1, 0]
+            }
+          },
+          pending: {
+            $sum: {
+              $cond: [{ $in: ['$status', ['pending', 'confirmed']] }, 1, 0]
+            }
+          },
+          inClinic: {
+            $sum: {
+              $cond: [{ $eq: ['$appointmentType', 'clinic'] }, 1, 0]
+            }
+          },
+          video: {
+            $sum: {
+              $cond: [{ $eq: ['$appointmentType', 'video'] }, 1, 0]
+            }
+          },
+          inClinicCompleted: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$appointmentType', 'clinic'] },
+                    { $eq: ['$status', 'completed'] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          },
+          videoCompleted: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$appointmentType', 'video'] },
+                    { $eq: ['$status', 'completed'] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          },
+          inClinicPending: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$appointmentType', 'clinic'] },
+                    { $in: ['$status', ['pending', 'confirmed']] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          },
+          videoPending: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$appointmentType', 'video'] },
+                    { $in: ['$status', ['pending', 'confirmed']] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    // Get monthly stats for the specified year
+    const monthlyStats = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(doctorId),
+          date: {
+            $gte: new Date(currentYear, 0, 1),
+            $lte: new Date(currentYear, 11, 31, 23, 59, 59)
+          }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            month: { $month: '$date' },
+            appointmentType: '$appointmentType'
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $group: {
+          _id: '$_id.month',
+          inClinic: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.appointmentType', 'clinic'] }, '$count', 0]
+            }
+          },
+          video: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.appointmentType', 'video'] }, '$count', 0]
+            }
+          },
+          total: { $sum: '$count' }
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      }
+    ]);
+
+    // Fill missing months with zero values
+    const completeMonthlyStats = [];
+    for (let i = 1; i <= 12; i++) {
+      const monthData = monthlyStats.find(stat => stat._id === i);
+      completeMonthlyStats.push({
+        month: i,
+        inClinic: monthData ? monthData.inClinic : 0,
+        video: monthData ? monthData.video : 0,
+        total: monthData ? monthData.total : 0
+      });
+    }
+
+    // Get weekly stats for specified month
+    let weeklyStats = [];
+    if (month && year) {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+
+      const rawWeeklyStats = await Appointment.aggregate([
+        {
+          $match: {
+            doctor: new mongoose.Types.ObjectId(doctorId),
+            date: {
+              $gte: startDate,
+              $lte: endDate
+            }
+          }
+        },
+        {
+          $addFields: {
+            week: {
+              $ceil: {
+                $divide: [{ $dayOfMonth: '$date' }, 7]
+              }
+            }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              week: '$week',
+              appointmentType: '$appointmentType'
+            },
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $group: {
+            _id: '$_id.week',
+            inClinic: {
+              $sum: {
+                $cond: [{ $eq: ['$_id.appointmentType', 'clinic'] }, '$count', 0]
+              }
+            },
+            video: {
+              $sum: {
+                $cond: [{ $eq: ['$_id.appointmentType', 'video'] }, '$count', 0]
+              }
+            },
+            total: { $sum: '$count' }
+          }
+        },
+        {
+          $sort: { _id: 1 }
+        }
+      ]);
+
+      // Fill missing weeks with zero values (assuming max 5 weeks)
+      for (let i = 1; i <= 5; i++) {
+        const weekData = rawWeeklyStats.find(stat => stat._id === i);
+        weeklyStats.push({
+          week: i,
+          inClinic: weekData ? weekData.inClinic : 0,
+          video: weekData ? weekData.video : 0,
+          total: weekData ? weekData.total : 0
+        });
+      }
+    }
+
+    // Format response
+    const stats = overallStats[0] || {
+      total: 0,
+      completed: 0,
+      pending: 0,
+      inClinic: 0,
+      video: 0,
+      inClinicCompleted: 0,
+      videoCompleted: 0,
+      inClinicPending: 0,
+      videoPending: 0
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        overview: {
+          total: stats.total,
+          completed: stats.completed,
+          pending: stats.pending,
+          inClinic: {
+            total: stats.inClinic,
+            completed: stats.inClinicCompleted,
+            pending: stats.inClinicPending
+          },
+          video: {
+            total: stats.video,
+            completed: stats.videoCompleted,
+            pending: stats.videoPending
+          }
+        },
+        monthlyStats: completeMonthlyStats,
+        weeklyStats: weeklyStats,
+        year: currentYear,
+        month: month ? parseInt(month) : null
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching consultation stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch consultation statistics',
+      error: error.message
+    });
+  }
+};
+
+// Get consultation trends (last 6 months)
+exports.getConsultationTrends = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid doctor ID'
+      });
+    }
+
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const trends = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(doctorId),
+          date: { $gte: sixMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$date' },
+            month: { $month: '$date' },
+            appointmentType: '$appointmentType'
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: '$_id.year',
+            month: '$_id.month'
+          },
+          inClinic: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.appointmentType', 'clinic'] }, '$count', 0]
+            }
+          },
+          video: {
+            $sum: {
+              $cond: [{ $eq: ['$_id.appointmentType', 'video'] }, '$count', 0]
+            }
+          },
+          total: { $sum: '$count' }
+        }
+      },
+      {
+        $sort: { '_id.year': 1, '_id.month': 1 }
+      }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: trends.map(trend => ({
+        year: trend._id.year,
+        month: trend._id.month,
+        inClinic: trend.inClinic,
+        video: trend.video,
+        total: trend.total
+      }))
+    });
+
+  } catch (error) {
+    console.error('Error fetching consultation trends:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch consultation trends',
+      error: error.message
+    });
+  }
+};
 
 exports.bookAppointment = async (req, res) => {
   const session = await mongoose.startSession();
@@ -956,7 +1331,7 @@ exports.getDoctorDashboardStats = async (req, res) => {
   }
 };
 
-exports.rescheduleAppoinmentByDoctor = async (req, res) => {
+exports.rescheduleappointmentByDoctor = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -1036,7 +1411,7 @@ exports.rescheduleAppoinmentByDoctor = async (req, res) => {
 
   } catch (error) {
     await session.abortTransaction();
-    console.error("Error in rescheduleAppoinmentByDoctor:", error);
+    console.error("Error in rescheduleappointmentByDoctor:", error);
     res.status(500).send({ error: "Internal server error" });
   } finally {
     session.endSession();
@@ -2181,7 +2556,7 @@ exports.getDoctorRecentActivities = async (req, res) => {
       }
 
       if (appointment.rescheduledFrom !== null) {
-        latestActivity = "Appoinment is rescheduled";
+        latestActivity = "appointment is rescheduled";
       }
 
       if (latestActivity) {
@@ -2426,20 +2801,20 @@ exports.getAppointmentsByPagination = async (req, res) => {
   try {
     const doctorId = req.user.doctorId;
     const { page = 1, limit = 10, status, type, dateRange, sortBy = 'date', sortOrder = 'asc' } = req.query;
-    
+
     // Base query
     let query = { doctor: new mongoose.Types.ObjectId(doctorId) };
-    
+
     // Status filter
     if (status) {
       query.status = { $in: status.split(',') };
     }
-    
+
     // Type filter
     if (type) {
       query.appointmentType = { $in: type.split(',') };
     }
-    
+
     // Date range filter
     if (dateRange) {
       const [startDate, endDate] = dateRange.split(',');
@@ -2448,11 +2823,11 @@ exports.getAppointmentsByPagination = async (req, res) => {
         $lte: new Date(endDate)
       };
     }
-    
+
     // Sort options
     const sort = {};
     sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
-    
+
     // Execute query with pagination
     const appointments = await Appointment.find(query)
       .populate('patient', 'fullName profilePhoto')
@@ -2460,10 +2835,10 @@ exports.getAppointmentsByPagination = async (req, res) => {
       .limit(parseInt(limit))
       .skip((page - 1) * limit)
       .lean();
-    
+
     // Get total count for pagination
     const total = await Appointment.countDocuments(query);
-    
+
     // Transform data for frontend
     const transformed = appointments.map(appt => ({
       id: appt._id,
@@ -2478,7 +2853,7 @@ exports.getAppointmentsByPagination = async (req, res) => {
       appointmentDate: appt.date,
       slot: appt.slot
     }));
-    
+
     // Get all counts in parallel for better performance
     const [
       totalAppointments,
@@ -2491,54 +2866,54 @@ exports.getAppointmentsByPagination = async (req, res) => {
     ] = await Promise.all([
       // Total appointments
       Appointment.countDocuments({ doctor: new mongoose.Types.ObjectId(doctorId) }),
-      
+
       // Today's appointments
-      Appointment.countDocuments({ 
+      Appointment.countDocuments({
         doctor: new mongoose.Types.ObjectId(doctorId),
-        date: { 
+        date: {
           $gte: moment().startOf('day').toDate(),
           $lte: moment().endOf('day').toDate()
         }
       }),
-      
+
       // Completed today
-      Appointment.countDocuments({ 
+      Appointment.countDocuments({
         doctor: new mongoose.Types.ObjectId(doctorId),
         status: 'completed',
-        date: { 
+        date: {
           $gte: moment().startOf('day').toDate(),
           $lte: moment().endOf('day').toDate()
         }
       }),
-      
+
       // Upcoming today
-      Appointment.countDocuments({ 
+      Appointment.countDocuments({
         doctor: new mongoose.Types.ObjectId(doctorId),
         status: { $in: ['pending', 'confirmed'] },
-        date: { 
+        date: {
           $gte: moment().startOf('day').toDate(),
           $lte: moment().endOf('day').toDate()
         }
       }),
-      
+
       // All upcoming appointments (future dates)
-      Appointment.countDocuments({ 
+      Appointment.countDocuments({
         doctor: new mongoose.Types.ObjectId(doctorId),
         status: { $in: ['pending', 'confirmed'] },
         date: { $gt: moment().endOf('day').toDate() }
       }),
-      
+
       // Past appointments (completed or cancelled)
-      Appointment.countDocuments({ 
+      Appointment.countDocuments({
         doctor: new mongoose.Types.ObjectId(doctorId),
         status: { $in: ['completed', 'cancelled', 'no_show'] },
         date: { $lt: moment().startOf('day').toDate() }
       }),
-      
+
       // Satisfaction rate
       calculateSatisfactionRate(doctorId)
     ]);
-    
+
     res.json({
       success: true,
       data: {
@@ -2560,7 +2935,7 @@ exports.getAppointmentsByPagination = async (req, res) => {
         }
       }
     });
-    
+
   } catch (error) {
     console.error('Error fetching appointments:', error);
     res.status(500).json({
@@ -2588,7 +2963,7 @@ async function calculateSatisfactionRate(doctorId) {
         }
       }
     ]);
-    
+
     if (result.length > 0 && result[0].averageRating) {
       return Math.round((result[0].averageRating / 5) * 100);
     }
@@ -2598,8 +2973,3 @@ async function calculateSatisfactionRate(doctorId) {
     return 95; // Return default value on error
   }
 }
-
-
-
-
-

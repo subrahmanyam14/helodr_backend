@@ -52,8 +52,8 @@ app.use('/api/doctors', (req, res) => {
 });
 
 
-app.use('/api/appoinment', (req, res) => {
-  console.log(`Routing /api/appoinment → ${serviceCUrl}`);
+app.use('/api/appointment', (req, res) => {
+  console.log(`Routing /api/appointment → ${serviceCUrl}`);
   proxy.web(req, res, { target: serviceCUrl });
 });
 

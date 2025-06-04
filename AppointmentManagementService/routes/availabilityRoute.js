@@ -6,6 +6,12 @@ const { protect, authorize } = require('../middleware/auth');
 
 // Base route: /api/availabilities
 
+availabilityRouter.get('/doctor/:doctorId/calendar', availabilityController.getDoctorCalendar);
+
+availabilityRouter.get('/doctor/:doctorId/today', availabilityController.getTodaySchedule);
+
+availabilityRouter.get('/doctor/:doctorId/stats', availabilityController.getMonthlyStats);
+
 // Get a single availability by ID
 availabilityRouter.get('/', protect, authorize('doctor'), availabilityController.getAvailabilityById);
 

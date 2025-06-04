@@ -1,7 +1,196 @@
 const mongoose = require('mongoose');
 const Availability = require('../models/Availability');
+const Appointment = require('../models/Appointment');
 const Doctor = require("../models/Doctor");
 const { validationResult } = require('express-validator');
+
+// GET /api/availability/doctor/:doctorId/calendar?year=2025&month=5
+exports.getDoctorCalendar = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { year, month } = req.query;
+    
+    const startDate = new Date(year, month, 1);
+    const endDate = new Date(year, parseInt(month) + 1, 0);
+    
+    const availability = await Availability.findOne({
+      doctor: doctorId,
+      isActive: true,
+      $or: [
+        { effectiveTo: { $exists: false } },
+        { effectiveTo: { $gte: startDate } }
+      ],
+      effectiveFrom: { $lte: endDate }
+    });
+
+    if (!availability) {
+      return res.status(404).json({
+        success: false,
+        message: 'No availability found for this doctor'
+      });
+    }
+
+    const calendarData = {};
+    const daysInMonth = endDate.getDate();
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const currentDate = new Date(year, month, day);
+      const slots = availability.getAvailableSlotsForDate(currentDate);
+      
+      // Get booked appointments for this day
+      const bookedAppointments = await Appointment.find({
+        doctor: doctorId,
+        date: {
+          $gte: new Date(year, month, day, 0, 0, 0),
+          $lt: new Date(year, month, day, 23, 59, 59)
+        },
+        status: { $in: ['pending', 'confirmed'] }
+      }).select('slot appointmentType patient');
+
+      const bookedVideoSlots = bookedAppointments
+        .filter(apt => apt.appointmentType === 'video')
+        .map(apt => ({
+          time: apt.slot.startTime,
+          id: `${day}-${apt.slot.startTime}-video`,
+          type: 'video',
+          appointmentId: apt._id,
+          patientId: apt.patient
+        }));
+
+      const bookedClinicSlots = bookedAppointments
+        .filter(apt => apt.appointmentType === 'clinic')
+        .map(apt => ({
+          time: apt.slot.startTime,
+          id: `${day}-${apt.slot.startTime}-clinic`,
+          type: 'clinic',
+          appointmentId: apt._id,
+          patientId: apt.patient
+        }));
+
+      const availableVideoSlots = slots.video.slots.map(time => ({
+        time,
+        id: `${day}-${time}-video`,
+        type: 'video',
+        fee: slots.video.fee
+      }));
+
+      const availableClinicSlots = slots.clinic.slots.map(time => ({
+        time,
+        id: `${day}-${time}-clinic`,
+        type: 'clinic',
+        fee: slots.clinic.fee
+      }));
+
+      const totalAvailable = availableVideoSlots.length + availableClinicSlots.length;
+      const totalBooked = bookedVideoSlots.length + bookedClinicSlots.length;
+      const total = totalAvailable + totalBooked;
+
+      calendarData[day] = {
+        total,
+        occupied: totalBooked,
+        available: totalAvailable,
+        availableVideoSlots,
+        availableClinicSlots,
+        bookedVideoSlots,
+        bookedClinicSlots,
+        status: totalAvailable === 0 ? 'full' : totalAvailable <= 3 ? 'limited' : 'available'
+      };
+    }
+
+    res.json({
+      success: true,
+      data: calendarData,
+      message: 'Calendar data fetched successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching calendar data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch calendar data',
+      error: error.message
+    });
+  }
+};
+
+// GET /api/availability/doctor/:doctorId/today
+exports.getTodaySchedule = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const today = new Date();
+    
+    const todayAppointments = await Appointment.find({
+      doctor: doctorId,
+      date: {
+        $gte: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0),
+        $lt: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59)
+      },
+      status: { $in: ['pending', 'confirmed'] }
+    })
+    .populate('patient', 'firstName lastName')
+    .select('slot appointmentType patient status')
+    .sort({ 'slot.startTime': 1 });
+
+    const schedule = todayAppointments.map(apt => ({
+      time: apt.slot.startTime,
+      type: apt.appointmentType,
+      patient: apt.patient ? `${apt.patient.firstName} ${apt.patient.lastName}` : 'Unknown',
+      status: apt.status
+    }));
+
+    res.json({
+      success: true,
+      data: schedule,
+      message: 'Today\'s schedule fetched successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching today\'s schedule:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch today\'s schedule',
+      error: error.message
+    });
+  }
+};
+
+// GET /api/availability/doctor/:doctorId/stats?year=2025&month=5
+exports.getMonthlyStats = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { year, month } = req.query;
+    
+    const startDate = new Date(year, month, 1);
+    const endDate = new Date(year, parseInt(month) + 1, 0);
+    
+    const appointments = await Appointment.find({
+      doctor: doctorId,
+      date: { $gte: startDate, $lte: endDate },
+      status: { $in: ['pending', 'confirmed', 'completed'] }
+    });
+
+    const stats = {
+      totalAppointments: appointments.length,
+      videoConsultations: appointments.filter(apt => apt.appointmentType === 'video').length,
+      clinicConsultations: appointments.filter(apt => apt.appointmentType === 'clinic').length,
+      completedAppointments: appointments.filter(apt => apt.status === 'completed').length
+    };
+
+    res.json({
+      success: true,
+      data: stats,
+      message: 'Monthly stats fetched successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching monthly stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch monthly stats',
+      error: error.message
+    });
+  }
+};
 
 // Get doctor's available slots
 exports.getDoctorAvailableSlots = async (req, res) => {

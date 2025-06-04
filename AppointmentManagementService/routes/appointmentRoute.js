@@ -1,7 +1,7 @@
 const express = require('express');
 const appointmentRouter = express.Router();
 const appointmentController = require('../controllers/appointmentController');
-const {authorize, protect} = require('../middleware/auth');
+const { authorize, protect } = require('../middleware/auth');
 
 // Book an appointment
 appointmentRouter.post('/book', protect, appointmentController.bookAppointment);
@@ -17,9 +17,14 @@ appointmentRouter.put('/:id/status', protect, appointmentController.updateAppoin
 
 // Add prescription to appointment
 appointmentRouter.put('/:id/prescription',
-     protect, 
-     authorize("doctor"),
+      protect,
+      authorize("doctor"),
       appointmentController.addPrescription);
+
+// Get appointmentStats by doctor ID
+appointmentRouter.get('/doctor/:doctorId/stats', appointmentController.getConsultationStats);
+
+appointmentRouter.get('/doctor/:doctorId/trends', appointmentController.getConsultationTrends);
 
 // Get upcoming video appointments
 appointmentRouter.get('/doctor/:doctorId/upcoming/video', appointmentController.getUpcomingVideoAppointments);
@@ -32,13 +37,13 @@ appointmentRouter.get('/doctor/:doctorId/cancelled', appointmentController.getCa
 
 
 // get patients assigned to a doctor
-appointmentRouter.get('/doctors/patients',appointmentController.getDoctorPatients)
+appointmentRouter.get('/doctors/patients', appointmentController.getDoctorPatients)
 
 //doctor get particular patient's details by his id 
-appointmentRouter.get( '/doctors/:doctorId/patients/:id',appointmentController.getDoctorPatientById)
+appointmentRouter.get('/doctors/:doctorId/patients/:id', appointmentController.getDoctorPatientById)
 
 //post notes to patient by doctor to patient
-appointmentRouter.post('/patients/:id/notes',appointmentController.addPatientNotes)
+appointmentRouter.post('/patients/:id/notes', appointmentController.addPatientNotes)
 
 appointmentRouter.get('/presentmonth/confirmed', protect, authorize('doctor'), appointmentController.getDoctorConfirmedAppointmentsForCurrentMonth);
 
@@ -48,11 +53,11 @@ appointmentRouter.get('/doctor/totalpatients', protect, authorize('doctor'), app
 
 appointmentRouter.get('/doctor/dashboard-statics', protect, authorize('doctor'), appointmentController.getDoctorDashboardStats);
 
-appointmentRouter.get('/appoinments/online-consults',  protect, authorize('doctor'),  appointmentController.getOnlineConsultsForCurrentMonth);
+appointmentRouter.get('/appointments/online-consults', protect, authorize('doctor'), appointmentController.getOnlineConsultsForCurrentMonth);
 
-appointmentRouter.post('/reschedule/appoinment', appointmentController.rescheduleAppoinmentByDoctor);
+appointmentRouter.post('/reschedule/appointment', appointmentController.rescheduleappointmentByDoctor);
 
-appointmentRouter.get('/statistics/appoinments', protect, appointmentController.getDoctorAppointmentStatistics);
+appointmentRouter.get('/statistics/appointments', protect, appointmentController.getDoctorAppointmentStatistics);
 
 appointmentRouter.get('/statistics/graph', protect, appointmentController.getDoctorAppointmentsStaticsForGraph);
 
@@ -72,5 +77,5 @@ appointmentRouter.get('/patient/activities', protect, authorize('doctor'), appoi
 
 appointmentRouter.get('/doctor/dashboard', protect, authorize('doctor'), appointmentController.dashboard);
 
-appointmentRouter.get('/doctor/appoinments', protect, authorize('doctor'), appointmentController.getAppointmentsByPagination);
+appointmentRouter.get('/doctor/appointments', protect, authorize('doctor'), appointmentController.getAppointmentsByPagination);
 module.exports = appointmentRouter;
