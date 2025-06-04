@@ -1051,7 +1051,7 @@ exports.getDoctorConfirmedAppointmentsForCurrentMonth = async (req, res) => {
     })
       .populate({
         path: "patient",
-        select: "fullName email countryCode mobileNumber gender dateOfBirth" // Include additional patient details
+        select: "fullName email countryCode mobileNumber gender dateOfBirth profilePhoto" // Include additional patient details
       })
       .populate({
         path: "doctor",
@@ -1331,23 +1331,56 @@ exports.getDoctorDashboardStats = async (req, res) => {
   }
 };
 
-exports.rescheduleappointmentByDoctor = async (req, res) => {
+exports.rescheduleAppoinment = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { appointmentId, doctorId, newDate, newStartTime } = req.body;
+    const { appointmentId, newDate, newStartTime } = req.body;
+    const userId = req.user.id;
+    const doctorId = req.user.doctorId;
+    const isDoctor = doctorId ? true : false;
+
+    // Validate input
+    if (!appointmentId || !newDate || !newStartTime) {
+      return res.status(400).send({ error: "appointmentId, newDate, and newStartTime are required" });
+    }
 
     const existingAppointment = await Appointment.findById(appointmentId).session(session);
     if (!existingAppointment) {
       return res.status(404).send({ error: `Appointment not found with ID: ${appointmentId}` });
     }
 
-    if (existingAppointment.doctor.toString() !== doctorId) {
-      return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
+    // Check if the user has permission to reschedule
+    if (isDoctor) {
+      if (existingAppointment.doctor.toString() !== doctorId) {
+        return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
+      }
+    } else {
+      if (existingAppointment.patient.toString() !== userId.toString()) {
+        return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
+      }
+    }
+
+    // Check if the appointment can be rescheduled based on time constraints
+    const now = new Date();
+    const appointmentDateTime = new Date(existingAppointment.date);
+    appointmentDateTime.setHours(parseInt(existingAppointment.slot.startTime.split(':')[0]));
+    appointmentDateTime.setMinutes(parseInt(existingAppointment.slot.startTime.split(':')[1]));
+
+    const timeDifference = (appointmentDateTime - now) / (1000 * 60 * 60); // in hours
+
+    if (isDoctor) {
+      if (timeDifference < 1) {
+        return res.status(400).send({ error: "Doctors can only reschedule appointments at least 1 hour before the appointment time." });
+      }
+    } else {
+      if (timeDifference < 20) {
+        return res.status(400).send({ error: "Patients can only reschedule appointments at least 20 hours before the appointment time." });
+      }
     }
 
     // Check doctor availability
-    const availability = await Availability.findOne({ doctor: doctorId }).session(session);
+    const availability = await Availability.findOne({ doctor: existingAppointment.doctor }).session(session);
     if (!availability) {
       throw new Error("Doctor availability not found");
     }
@@ -1359,62 +1392,49 @@ exports.rescheduleappointmentByDoctor = async (req, res) => {
 
     // Check slot availability
     const availableSlots = availability.getAvailableSlotsForDate(appointmentDate);
+    console.log(availableSlots);
     const type = existingAppointment.appointmentType;
     if (!availableSlots[type] || !availableSlots[type].slots.includes(newStartTime)) {
       return res.status(400).send({ error: `Slot ${newStartTime} not available for ${type} consultation` });
     }
 
-    // Create new appointment
-    const newAppointment = new Appointment({
-      patient: existingAppointment.patient,
-      doctor: doctorId,
-      appointmentType: type,
-      date: appointmentDate,
-      slot: {
-        startTime: newStartTime,
-        endTime: calculateEndTime(newStartTime, availability.slotDuration || 20),
+    // Update the appointment
+    const updatedAppointment = await Appointment.findByIdAndUpdate(
+      appointmentId,
+      {
+        $set: {
+          date: appointmentDate,
+          'slot.startTime': newStartTime,
+          'slot.endTime': calculateEndTime(newStartTime, availability.slotDuration || 20),
+          status: 'rescheduled'
+        },
+        $push: {
+          rescheduledFrom: {
+            startTime: existingAppointment.slot.startTime,
+            endTime: existingAppointment.slot.endTime,
+            previousDate: existingAppointment.date,
+            rescheduleBy: isDoctor? "doctor" : "patient"
+          }
+        }
       },
-      reason: existingAppointment.reason || "",
-      payment: existingAppointment.payment,
-      rescheduledFrom: existingAppointment._id,
-      videoConferenceLink: existingAppointment.videoConferenceLink,
-      status: "confirmed"
-    });
-
-    // Save new appointment
-    await newAppointment.save({ session });
-
-    // Mark old appointment as rescheduled
-    existingAppointment.status = "rescheduled";
-    await existingAppointment.save({ session });
-
-    // Update related data
-    await availability.bookSlot(
-      appointmentDate.toISOString().split('T')[0],
-      newAppointment.slot,
-      type,
-      newAppointment._id
+      { new: true, session }
     );
 
-    await Payment.findByIdAndUpdate(existingAppointment.payment, { appointment: newAppointment._id }).session(session);
-    await UpcomingEarnings.findOneAndUpdate({ payment: existingAppointment.payment }, { appointment: newAppointment._id }).session(session);
-
-    await availability.save({ session });
+    // Send notification to the other party (patient if doctor rescheduled, or doctor if patient rescheduled)
+    // Implementation depends on your notification system
 
     await session.commitTransaction();
+    session.endSession();
 
-    res.status(201).json({
-      success: true,
-      data: newAppointment,
-      message: "Appointment rescheduled successfully"
+    res.status(200).send({
+      message: "Appointment rescheduled successfully",
+      appointment: updatedAppointment
     });
-
   } catch (error) {
     await session.abortTransaction();
-    console.error("Error in rescheduleappointmentByDoctor:", error);
-    res.status(500).send({ error: "Internal server error" });
-  } finally {
     session.endSession();
+    console.log("Error in rescheduleAppointment: ", error);
+    res.status(500).send({ error: "Internal server error..." });
   }
 };
 
@@ -2972,4 +2992,129 @@ async function calculateSatisfactionRate(doctorId) {
     console.error('Error calculating satisfaction rate:', error);
     return 95; // Return default value on error
   }
+<<<<<<< HEAD
 }
+=======
+}
+
+
+
+exports.getLastSixWeeksAppointmentsTrend = async (req, res) => {
+  try {
+    const { doctorId } = req.user;
+    
+    if (!doctorId) {
+      return res.status(400).json({ message: "Doctor ID is required" });
+    }
+
+    // Get current date ranges
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    currentMonthEnd.setHours(23, 59, 59, 999);
+
+    // Get previous month date ranges
+    const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    prevMonthEnd.setHours(23, 59, 59, 999);
+
+    // 1. Get total appointment count
+    const totalAppointments = await Appointment.countDocuments({ doctor: doctorId });
+
+    // 2. Get current and previous month appointment counts
+    const [monthAppointments, prevMonthAppointments] = await Promise.all([
+      Appointment.countDocuments({
+        doctor: doctorId,
+        date: { $gte: currentMonthStart, $lte: currentMonthEnd }
+      }),
+      Appointment.countDocuments({
+        doctor: doctorId,
+        date: { $gte: prevMonthStart, $lte: prevMonthEnd }
+      })
+    ]);
+
+    // 3. Calculate monthly growth rate
+    let monthlyGrowthRate = "0%";
+    if (prevMonthAppointments > 0) {
+      const growth = ((monthAppointments - prevMonthAppointments) / prevMonthAppointments) * 100;
+      monthlyGrowthRate = `${growth >= 0 ? '+' : ''}${growth.toFixed(1)}%`;
+    } else if (monthAppointments > 0) {
+      monthlyGrowthRate = "+100%"; // Handle case where previous month had 0 appointments
+    }
+
+    // 4. Get weekly breakdown for the last 6 weeks
+    const sixWeeksAgo = new Date(now);
+    sixWeeksAgo.setDate(now.getDate() - 42); // 6 weeks * 7 days
+
+    const weeklyAppointments = await Appointment.aggregate([
+      {
+        $match: {
+          doctor: doctorId,
+          date: { $gte: sixWeeksAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$date" },
+            month: { $month: "$date" },
+            week: { $week: "$date" }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { "_id.year": 1, "_id.month": 1, "_id.week": 1 }
+      },
+      {
+        $limit: 6 // Get last 6 weeks
+      }
+    ]);
+
+    // Format weekly data
+    const appointmentsData = weeklyAppointments.map((week, index) => ({
+      week: `Week ${index + 1}`,
+      count: week.count
+    }));
+
+    // 5. Get additional stats
+    const [statusCounts, appointmentTypes] = await Promise.all([
+      Appointment.aggregate([
+        { $match: { doctor: doctorId } },
+        { $group: { _id: "$status", count: { $sum: 1 } } }
+      ]),
+      Appointment.aggregate([
+        { $match: { doctor: doctorId } },
+        { $group: { _id: "$appointmentType", count: { $sum: 1 } } }
+      ])
+    ]);
+
+    // Format response
+    const response = {
+      totalAppointments,
+      currentMonthAppointments: monthAppointments,
+      monthlyGrowthRate, // Added growth rate
+      appointmentsData,
+      statusDistribution: statusCounts.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {}),
+      typeDistribution: appointmentTypes.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {})
+    };
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error fetching appointment statistics:", error);
+    res.status(500).json({ message: "Error fetching appointment statistics" });
+  }
+};
+
+
+
+
+
+
+>>>>>>> c059c9914b15544573f6bf61f98ddec982d8c96d

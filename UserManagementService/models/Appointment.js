@@ -43,10 +43,24 @@ const appointmentSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Payment"
   }, 
-  rescheduledFrom: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Appointment"
-  }, 
+  rescheduledFrom: [{
+    startTime: {
+      type: String,
+      required: true
+    },
+    endTime: {
+      type: String,
+      required: true
+    },
+    previousDate: {
+       type: Date,
+    required: true
+    } ,
+    rescheduleBy:{
+      type: String,
+      enum:["patient", "doctor"]
+    }
+  }], 
   medicalRecords: [{
     type: {
       type: String,

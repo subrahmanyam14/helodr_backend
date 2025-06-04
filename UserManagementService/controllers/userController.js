@@ -352,6 +352,139 @@ exports.registerPatient = async (req, res) => {
 };
 
 
+// @desc    Register patient (initial step)
+// @route   POST /api/v1/auth/register
+// @access  Public
+exports.registerAdmin = async (req, res) => {
+  try {
+    const { fullName, mobileNumber, email, countryCode, password, role } = req.body;
+
+    // Basic validation
+    if (!fullName || !mobileNumber || !countryCode || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide full name, mobile number, country code and password'
+      });
+    }
+
+    // Check if mobile number already exists
+    const existingUser = await User.findOne({ $or: [{email: email}, {$and: [{ mobileNumber }, { countryCode }]}] });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number or email already registered'
+      });
+    }
+
+    // Create user with minimal data
+    const user = await User.create({
+      fullName,
+      mobileNumber,
+      countryCode,
+      password,
+      email,
+      role,
+      isMobileVerified: false
+    });
+
+    // Generate OTP
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes expiry
+
+    await Otp.findOneAndUpdate(
+      { user_id: user._id },
+      {
+        otp_code: otp,
+        expires_at: otpExpiry
+      },
+      {
+        upsert: true, // create if not exists
+        new: true,    // return the updated document
+        setDefaultsOnInsert: true // apply defaults if creating
+      }
+    );
+    
+    // Send OTP via API request
+    try {
+      const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
+        to: `${countryCode}${mobileNumber}`,
+        otp
+      });
+
+      // Check if API responded with success
+      if (response.data.success !== true) {
+        throw new Error(response.data.message || 'Failed to send OTP');
+      }
+    } catch (apiError) {
+      console.error('Error sending OTP:', apiError.message || apiError.response?.data);
+
+      // Rollback user creation if OTP sending fails
+      await User.findByIdAndDelete(user._id);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Registration failed: Unable to send OTP',
+        error: apiError.message || 'Unknown error while sending OTP'
+      });
+    }
+
+    const emailVerifyToken = jwt.sign(
+      { id: user._id, email, purpose: 'email_verification' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
+
+    // Send email verification request with error handling
+    try {
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendEmailVerification`, {
+        fullName: user.fullName,
+        email,
+        token: emailVerifyToken,
+        url: process.env.FRONTEND_URL
+      });
+
+      // Check if the email service returned success
+      if (response.status !== 200) {
+        throw new Error(response.data.message || 'Failed to send email verification');
+      }
+    } catch (apiError) {
+      console.error('Error sending email verification:', apiError.response?.data || apiError.message);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send email verification. Please try again later.',
+        error: apiError.message || 'Unknown error'
+      });
+    }
+
+    
+
+    // Generate temporary token for verification step
+    const tempToken = jwt.sign(
+      { id: user._id, purpose: 'mobile_verification' },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Registration initiated. OTP sent to mobile.',
+      data: {
+        verificationToken: tempToken,
+        mobileNumber: user.mobileNumber,
+        userId: user._id
+      }
+    });
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Registration failed',
+      error: error.message
+    });
+  }
+};
+
 // @desc    Verify mobile OTP
 // @route   POST /api/v1/auth/verify-mobile
 // @access  Public

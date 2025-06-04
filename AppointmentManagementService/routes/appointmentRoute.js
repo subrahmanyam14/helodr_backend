@@ -55,7 +55,7 @@ appointmentRouter.get('/doctor/dashboard-statics', protect, authorize('doctor'),
 
 appointmentRouter.get('/appointments/online-consults', protect, authorize('doctor'), appointmentController.getOnlineConsultsForCurrentMonth);
 
-appointmentRouter.post('/reschedule/appointment', appointmentController.rescheduleappointmentByDoctor);
+appointmentRouter.post('/reschedule/appoinment', protect, appointmentController.rescheduleAppoinment);
 
 appointmentRouter.get('/statistics/appointments', protect, appointmentController.getDoctorAppointmentStatistics);
 
@@ -77,5 +77,7 @@ appointmentRouter.get('/patient/activities', protect, authorize('doctor'), appoi
 
 appointmentRouter.get('/doctor/dashboard', protect, authorize('doctor'), appointmentController.dashboard);
 
-appointmentRouter.get('/doctor/appointments', protect, authorize('doctor'), appointmentController.getAppointmentsByPagination);
+appointmentRouter.get('/doctor/appoinments', protect, authorize('doctor'), appointmentController.getAppointmentsByPagination);
+
+appointmentRouter.get('/doctor/getLastSixWeeksAppoinmentsTrend', protect, authorize('doctor'), appointmentController.getLastSixWeeksAppointmentsTrend);
 module.exports = appointmentRouter;

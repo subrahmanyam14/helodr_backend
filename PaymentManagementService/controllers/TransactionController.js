@@ -1,5 +1,6 @@
 const Transaction = require("../models/Transaction");
 const mongoose = require("mongoose");
+const UpcomingEarnings = require("../models/UpcomingEarnings");
 
 // Create a new transaction
 const createTransaction = async (req, res) => {
@@ -265,6 +266,364 @@ const getTransactionStats = async (req, res) => {
 };
 
 
+const getAllTransactions = async (req, res) => {
+  try {
+    const { doctorId } = req.user;
+    
+    if (!doctorId) {
+      return res.status(400).json({ message: "Doctor ID is required" });
+    }
+
+    // 1. Get transaction history (all completed transactions)
+    const historyTransactions = await Transaction.find({
+      user: req.user.id,
+      type: "doctor_credit",
+      status: "completed"
+    })
+    .sort({ createdAt: -1 })
+    .populate({
+      path: 'referenceId',
+      match: { referenceType: 'Appointment' },
+      populate: {
+        path: 'patient',
+        select: 'fullName'
+      }
+    });
+    
+
+    // 2. Get today's transactions
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    // Today's completed transactions
+    const completedToday = await Transaction.find({
+      user: doctorId,
+      type: "doctor_credit",
+      status: "completed",
+      createdAt: { $gte: todayStart, $lte: todayEnd }
+    })
+    .populate({
+      path: 'referenceId',
+      match: { referenceType: 'Appointment' },
+      populate: {
+        path: 'patient',
+        select: 'fullName'
+      }
+    });
+
+    // Today's processing transactions
+    const processingToday = await Transaction.find({
+      user: doctorId,
+      type: "doctor_credit",
+      status: "processing",
+      createdAt: { $gte: todayStart, $lte: todayEnd }
+    })
+    .populate({
+      path: 'referenceId',
+      match: { referenceType: 'Appointment' },
+      populate: {
+        path: 'patient',
+        select: 'fullName'
+      }
+    });
+
+    // Today's upcoming earnings
+    const upcomingToday = await UpcomingEarnings.find({
+      doctor: doctorId,
+      status: "pending",
+      scheduledDate: { $gte: todayStart, $lte: todayEnd }
+    })
+    .populate({
+      path: 'appointment',
+      populate: {
+        path: 'patient',
+        select: 'fullName'
+      }
+    });
+
+    // 3. Get all upcoming payments
+    const upcomingPayments = await UpcomingEarnings.find({
+      doctor: doctorId,
+      status: "pending"
+    })
+    .populate({
+      path: 'appointment',
+      populate: {
+        path: 'patient',
+        select: 'fullName'
+      }
+    })
+    .sort({ scheduledDate: 1 });
+
+    // Format all responses
+    const formattedHistory = historyTransactions.map(transaction => ({
+      id: transaction._id,
+      patient: transaction.referenceId?.patient?.fullName || "Unknown",
+      date: transaction.createdAt.toISOString().split('T')[0],
+      amount: transaction.amount,
+      status: 'Completed'
+    }));
+
+    const formattedCompletedToday = completedToday.map(t => ({
+      id: t._id,
+      patient: t.referenceId?.patient?.fullName || "Unknown",
+      time: t.createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      amount: t.amount,
+      status: 'Completed'
+    }));
+
+    const formattedProcessingToday = processingToday.map(t => ({
+      id: t._id,
+      patient: t.referenceId?.patient?.fullName || "Unknown",
+      time: t.createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      amount: t.amount,
+      status: 'Processing'
+    }));
+
+    const formattedUpcomingToday = upcomingToday.map(e => ({
+      id: e._id,
+      patient: e.appointment?.patient?.fullName || "Unknown",
+      time: e.scheduledDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      amount: e.amount,
+      status: 'Upcoming'
+    }));
+
+    const todayTransactions = [
+      ...formattedCompletedToday,
+      ...formattedProcessingToday,
+      ...formattedUpcomingToday
+    ].sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    const formattedUpcomingPayments = upcomingPayments.map(payment => ({
+      id: payment._id,
+      patient: payment.appointment?.patient?.fullName || "Unknown",
+      date: payment.scheduledDate.toISOString().split('T')[0],
+      amount: payment.amount,
+      status: 'Pending'
+    }));
+
+    res.status(200).json({
+      history: formattedHistory,
+      today: todayTransactions,
+      upcoming: formattedUpcomingPayments
+    });
+  } catch (error) {
+    console.error("Error fetching all transaction data:", error);
+    res.status(500).json({ message: "Error fetching all transaction data" });
+  }
+}
+
+const getWeekAndMonthEarning = async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+    
+    if (!doctorId) {
+      return res.status(400).json({ message: "Doctor ID is required" });
+    }
+
+    // Convert string ID to ObjectId if needed
+    const doctorObjectId = mongoose.Types.ObjectId.isValid(doctorId) 
+      ? new mongoose.Types.ObjectId(doctorId) 
+      : doctorId;
+
+    // Get date ranges for calculations
+    const now = new Date();
+    
+    // Current week (last 7 days)
+    const oneWeekAgo = new Date(now);
+    oneWeekAgo.setDate(now.getDate() - 7);
+    oneWeekAgo.setHours(0, 0, 0, 0);
+    
+    // Last week (14 days ago to 7 days ago)
+    const twoWeeksAgo = new Date(now);
+    twoWeeksAgo.setDate(now.getDate() - 14);
+    twoWeeksAgo.setHours(0, 0, 0, 0);
+    
+    // Six months ago
+    const sixMonthsAgo = new Date(now);
+    sixMonthsAgo.setMonth(now.getMonth() - 6);
+    sixMonthsAgo.setDate(1);
+    sixMonthsAgo.setHours(0, 0, 0, 0);
+
+    // 1. Get current week earnings (last 7 days)
+    const currentWeekEarnings = await Transaction.aggregate([
+      {
+        $match: {
+          user: doctorObjectId,
+          type: "doctor_credit",
+          status: "completed",
+          createdAt: { $gte: oneWeekAgo, $lte: now }
+        }
+      },
+      {
+        $group: {
+          _id: { $dayOfWeek: "$createdAt" },
+          amount: { $sum: "$amount" }
+        }
+      }
+    ]);
+
+    // 2. Get last week earnings (14 days ago to 7 days ago)
+    const lastWeekEarnings = await Transaction.aggregate([
+      {
+        $match: {
+          user: doctorObjectId,
+          type: "doctor_credit",
+          status: "completed",
+          createdAt: { $gte: twoWeeksAgo, $lt: oneWeekAgo }
+        }
+      },
+      {
+        $group: {
+          _id: { $dayOfWeek: "$createdAt" },
+          amount: { $sum: "$amount" }
+        }
+      }
+    ]);
+
+    // Format weekly earnings data (MongoDB dayOfWeek: 1=Sunday, 7=Saturday)
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weeklyEarningsChart = days.map((day, index) => {
+      const dayOfWeek = index + 1; // Convert to MongoDB dayOfWeek format
+      const currentDay = currentWeekEarnings.find(d => d._id === dayOfWeek);
+      const lastWeekDay = lastWeekEarnings.find(d => d._id === dayOfWeek);
+      
+      return {
+        day,
+        amount: currentDay ? parseFloat(currentDay.amount.toFixed(2)) : 0,
+        lastWeek: lastWeekDay ? parseFloat(lastWeekDay.amount.toFixed(2)) : 0
+      };
+    });
+
+    // 3. Get payment flow data (last 6 months) - Fixed to include both online and offline
+    const paymentFlowData = await Transaction.aggregate([
+      {
+        $match: {
+          user: doctorObjectId,
+          type: { $in: ["doctor_credit", "appointment_payment"] }, // Include both types
+          status: "completed",
+          createdAt: { $gte: sixMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            month: { $month: "$createdAt" },
+            year: { $year: "$createdAt" },
+            type: "$type"
+          },
+          amount: { $sum: "$amount" }
+        }
+      },
+      {
+        $sort: { "_id.year": 1, "_id.month": 1 }
+      }
+    ]);
+
+    // Format payment flow data for last 6 months
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const paymentFlowMap = new Map();
+
+    // Initialize last 6 months with zero values
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(now);
+      date.setMonth(date.getMonth() - i);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const monthName = monthNames[date.getMonth()];
+      paymentFlowMap.set(monthKey, { 
+        month: monthName, 
+        year: date.getFullYear(),
+        online: 0, 
+        offline: 0 
+      });
+    }
+
+    // Populate with actual data
+    paymentFlowData.forEach(item => {
+      const monthKey = `${item._id.year}-${String(item._id.month).padStart(2, '0')}`;
+      const type = item._id.type === "doctor_credit" ? "online" : "offline";
+      
+      if (paymentFlowMap.has(monthKey)) {
+        paymentFlowMap.get(monthKey)[type] += parseFloat(item.amount.toFixed(2));
+      }
+    });
+
+    const paymentFlow = Array.from(paymentFlowMap.values())
+      .map(item => ({
+        month: item.month,
+        online: parseFloat(item.online.toFixed(2)),
+        offline: parseFloat(item.offline.toFixed(2))
+      }));
+
+    // 4. Get additional stats
+    const [totalEarningsResult, pendingWithdrawalsResult] = await Promise.all([
+      Transaction.aggregate([
+        {
+          $match: {
+            user: doctorObjectId,
+            type: "doctor_credit",
+            status: "completed"
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: "$amount" }
+          }
+        }
+      ]),
+      Transaction.aggregate([
+        {
+          $match: {
+            user: doctorObjectId,
+            type: "withdrawal_request",
+            status: "pending"
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: "$amount" }
+          }
+        }
+      ])
+    ]);
+
+    const totalEarnings = totalEarningsResult[0]?.total || 0;
+    const pendingWithdrawals = pendingWithdrawalsResult[0]?.total || 0;
+    const availableBalance = totalEarnings - pendingWithdrawals;
+
+    // Format response
+    const response = {
+      weeklyEarningsChart,
+      paymentFlow,
+      stats: {
+        totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+        pendingWithdrawals: parseFloat(pendingWithdrawals.toFixed(2)),
+        availableBalance: parseFloat(availableBalance.toFixed(2))
+      }
+    };
+
+    res.status(200).json(response);
+  } catch (error) {
+    console.error("Error fetching dashboard transactions:", error);
+    
+    // Send more specific error information in development
+    const errorMessage = process.env.NODE_ENV === 'development' 
+      ? `Error fetching dashboard transactions: ${error.message}`
+      : "Error fetching dashboard transactions";
+      
+    res.status(500).json({ 
+      message: errorMessage,
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    });
+  }
+};
+
+
 
 
 module.exports = {
@@ -272,5 +631,7 @@ module.exports = {
   getTransactions,
   getTransactionById,
   updateTransactionStatus,
-  getTransactionStats
+  getTransactionStats,
+  getAllTransactions,
+  getWeekAndMonthEarning
 };
