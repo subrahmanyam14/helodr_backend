@@ -23,7 +23,7 @@ appointmentRouter.put('/:id/prescription',
 
 // Get appointmentStats by doctor ID
 appointmentRouter.get('/doctor/:doctorId/stats', appointmentController.getConsultationStats);
-
+appointmentRouter.get('/doctor/:doctorId/activity', appointmentController.getDoctorActivity);
 appointmentRouter.get('/doctor/:doctorId/trends', appointmentController.getConsultationTrends);
 
 // Get upcoming video appointments

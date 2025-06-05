@@ -8,6 +8,90 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Statistics = require("../models/Statistics");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
+const Wallet = require("../models/Wallet");
+
+exports.getDoctorActivity = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+
+    // Fetch wallet data
+    const wallet = await Wallet.findOne({ doctor: doctorId });
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Wallet not found"
+      });
+    }
+
+    // Fetch recent appointments (last 10 appointments)
+    const recentAppointments = await Appointment.find({ doctor: doctorId })
+      .populate('patient', 'fullName email mobileNumber')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('patient appointmentType date slot status payment createdAt reason');
+
+    // Prepare wallet overview
+    const walletOverview = {
+      current_balance: wallet.current_balance,
+      total_earned: wallet.total_earned,
+      total_withdrawn: wallet.total_withdrawn,
+      total_spent: wallet.total_spent,
+      commission_rate: wallet.commission_rate,
+      last_payment_date: wallet.last_payment_date,
+      last_withdrawal_date: wallet.last_withdrawal_date
+    };
+
+    // Format recent appointments for frontend
+    const formattedRecentAppointments = recentAppointments.map(appointment => ({
+      id: appointment._id,
+      patientName: appointment.patient?.fullName || 'Unknown Patient',
+      patientEmail: appointment.patient?.email,
+      appointmentType: appointment.appointmentType,
+      date: appointment.date,
+      startTime: appointment.slot.startTime,
+      endTime: appointment.slot.endTime,
+      status: appointment.status,
+      reason: appointment.reason,
+      createdAt: appointment.createdAt,
+      timeAgo: getTimeAgo(appointment.createdAt)
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        walletOverview,
+        recentAppointments: formattedRecentAppointments
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching doctor dashboard data:', error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard data",
+      error: error.message
+    });
+  }
+};
+
+// Helper function to calculate time ago
+const getTimeAgo = (date) => {
+  const now = new Date();
+  const diffTime = Math.abs(now - new Date(date));
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffHours = Math.floor(diffTime / (1000 * 60 * 60));
+  const diffMinutes = Math.floor(diffTime / (1000 * 60));
+
+  if (diffDays > 0) {
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  } else if (diffHours > 0) {
+    return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  } else if (diffMinutes > 0) {
+    return `${diffMinutes} minute${diffMinutes > 1 ? 's' : ''} ago`;
+  } else {
+    return 'Just now';
+  }
+};
 
 // Get consultation statistics for a doctor
 exports.getConsultationStats = async (req, res) => {
@@ -308,7 +392,6 @@ exports.getConsultationStats = async (req, res) => {
     });
   }
 };
-
 // Get consultation trends (last 6 months)
 exports.getConsultationTrends = async (req, res) => {
   try {
@@ -1240,18 +1323,14 @@ exports.getOnlineConsultsForCurrentMonth = async (req, res) => {
 
 exports.getDoctorDashboardStats = async (req, res) => {
   const { doctorId } = req.user;
-
   if (!mongoose.Types.ObjectId.isValid(doctorId)) {
     return res.status(400).json({ success: false, message: "Invalid doctor ID" });
   }
-
   try {
     const now = new Date();
-
     // Month Start & End
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-
     // Week Start & End (Sunday - Saturday)
     const dayOfWeek = now.getDay(); // 0 = Sunday
     const startOfWeek = new Date(now);
@@ -1262,12 +1341,11 @@ exports.getDoctorDashboardStats = async (req, res) => {
     endOfWeek.setHours(23, 59, 59, 999);
 
     // ---------- PARALLEL PROMISES ----------
-
     const [
       confirmedAppointments,
       weeklyRatings,
       uniquePatients,
-      onlineConsults
+      walletData
     ] = await Promise.all([
       // Confirmed Appointments (Current Month)
       Appointment.countDocuments({
@@ -1275,7 +1353,6 @@ exports.getDoctorDashboardStats = async (req, res) => {
         status: "confirmed",
         date: { $gte: firstDayOfMonth, $lte: lastDayOfMonth }
       }),
-
       // Weekly Ratings
       Appointment.aggregate([
         {
@@ -1293,20 +1370,15 @@ exports.getDoctorDashboardStats = async (req, res) => {
           }
         }
       ]),
-
       // Total Unique Patients (Lifetime)
       Appointment.distinct("patient", { doctor: doctorId }),
-
-      // Online Consultations (Current Month)
-      Appointment.countDocuments({
-        doctor: doctorId,
-        appointmentType: "video",
-        date: { $gte: firstDayOfMonth, $lte: lastDayOfMonth }
-      })
+      Wallet.findOne({ doctor: doctorId }).select('current_balance')
     ]);
 
     // Extract rating data
     const ratingData = weeklyRatings[0] || { averageRating: null, totalReviews: 0 };
+    const currentBalance = walletData ? walletData.current_balance : 0;
+    const commissionRate = walletData ? walletData.commission_rate : 20;
 
     res.status(200).json({
       success: true,
@@ -1315,12 +1387,12 @@ exports.getDoctorDashboardStats = async (req, res) => {
         averageWeeklyRating: ratingData.averageRating ? ratingData.averageRating.toFixed(2) : null,
         totalReviewsThisWeek: ratingData.totalReviews,
         totalUniquePatients: uniquePatients.length,
-        onlineConsultationsThisMonth: onlineConsults
+        currentBalance: currentBalance,
+        commissionRate: commissionRate
       },
       currentMonth: now.toLocaleString('default', { month: 'long' }),
       currentYear: now.getFullYear()
     });
-
   } catch (error) {
     console.error("Error fetching doctor dashboard stats:", error);
     res.status(500).json({
@@ -1413,7 +1485,7 @@ exports.rescheduleAppoinment = async (req, res) => {
             startTime: existingAppointment.slot.startTime,
             endTime: existingAppointment.slot.endTime,
             previousDate: existingAppointment.date,
-            rescheduleBy: isDoctor? "doctor" : "patient"
+            rescheduleBy: isDoctor ? "doctor" : "patient"
           }
         }
       },
@@ -2999,7 +3071,7 @@ async function calculateSatisfactionRate(doctorId) {
 exports.getLastSixWeeksAppointmentsTrend = async (req, res) => {
   try {
     const { doctorId } = req.user;
-    
+
     if (!doctorId) {
       return res.status(400).json({ message: "Doctor ID is required" });
     }
