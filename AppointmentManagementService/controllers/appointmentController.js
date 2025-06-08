@@ -583,8 +583,14 @@ exports.getAppointments = async (req, res) => {
     }
     // For doctors
     else if (req.user.role === 'doctor') {
-      query.doctor = req.user.id;
+      const doctor = await Doctor.findOne({ user: req.user.id });
+      if (doctor) {
+        query.doctor = doctor._id;
+      } else {
+        return res.status(404).json({ success: false, message: 'Doctor profile not found' });
+      }
     }
+
 
     if (status) {
       query.status = status;

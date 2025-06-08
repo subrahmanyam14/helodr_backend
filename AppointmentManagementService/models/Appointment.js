@@ -61,14 +61,6 @@ const appointmentSchema = new mongoose.Schema({
       enum:["patient", "doctor"]
     }
   }], 
-  medicalRecords: [{
-    type: {
-      type: String,
-      enum: ["prescription", "report", "image", "other"]
-    },
-    url: String,
-    description: String
-  }],
   prescription: {
     diagnosis: String,
     medicines: [{
