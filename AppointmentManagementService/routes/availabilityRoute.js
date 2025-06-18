@@ -5,6 +5,7 @@ const availabilityController = require('../controllers/availabilityController');
 const { protect, authorize } = require('../middleware/auth');
 
 // Base route: /api/availabilities
+availabilityRouter.get('/doctor/:doctorId/status', availabilityController.getAvailabilityStatus);
 
 availabilityRouter.get('/doctor/:doctorId/calendar', availabilityController.getDoctorCalendar);
 

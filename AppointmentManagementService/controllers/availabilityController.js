@@ -9,10 +9,10 @@ exports.getDoctorCalendar = async (req, res) => {
   try {
     const { doctorId } = req.params;
     const { year, month } = req.query;
-    
+
     const startDate = new Date(year, month, 1);
     const endDate = new Date(year, parseInt(month) + 1, 0);
-    
+
     const availability = await Availability.findOne({
       doctor: doctorId,
       isActive: true,
@@ -36,7 +36,7 @@ exports.getDoctorCalendar = async (req, res) => {
     for (let day = 1; day <= daysInMonth; day++) {
       const currentDate = new Date(year, month, day);
       const slots = availability.getAvailableSlotsForDate(currentDate);
-      
+
       // Get booked appointments for this day
       const bookedAppointments = await Appointment.find({
         doctor: doctorId,
@@ -118,7 +118,7 @@ exports.getTodaySchedule = async (req, res) => {
   try {
     const { doctorId } = req.params;
     const today = new Date();
-    
+
     const todayAppointments = await Appointment.find({
       doctor: doctorId,
       date: {
@@ -127,9 +127,9 @@ exports.getTodaySchedule = async (req, res) => {
       },
       status: { $in: ['pending', 'confirmed'] }
     })
-    .populate('patient', 'firstName lastName')
-    .select('slot appointmentType patient status')
-    .sort({ 'slot.startTime': 1 });
+      .populate('patient', 'firstName lastName')
+      .select('slot appointmentType patient status')
+      .sort({ 'slot.startTime': 1 });
 
     const schedule = todayAppointments.map(apt => ({
       time: apt.slot.startTime,
@@ -159,10 +159,10 @@ exports.getMonthlyStats = async (req, res) => {
   try {
     const { doctorId } = req.params;
     const { year, month } = req.query;
-    
+
     const startDate = new Date(year, month, 1);
     const endDate = new Date(year, parseInt(month) + 1, 0);
-    
+
     const appointments = await Appointment.find({
       doctor: doctorId,
       date: { $gte: startDate, $lte: endDate },
@@ -192,19 +192,260 @@ exports.getMonthlyStats = async (req, res) => {
   }
 };
 
+// Helper function to get status color based on availability percentage
+const getStatusColor = (availableSlots, totalSlots) => {
+  if (totalSlots === 0) return 'red'; // No slots configured
+
+  const percentage = (availableSlots / totalSlots) * 100;
+
+  if (percentage >= 80) return 'green';
+  if (percentage >= 60) return 'yellow';
+  if (percentage >= 30) return 'orange';
+  return 'red';
+};
+
+// Utility function to create date in local timezone
+const createLocalDate = (dateString) => {
+  if (!dateString) {
+    // Get today's date in local timezone
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  }
+
+  // Parse YYYY-MM-DD format in local timezone
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day); // month is 0-indexed
+};
+
+// Utility function to format date as YYYY-MM-DD
+const formatDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Utility function to add days safely
+const addDays = (date, days) => {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+
+// Utility function to get start of week (Sunday)
+const getStartOfWeek = (date) => {
+  const result = new Date(date);
+  const dayOfWeek = result.getDay();
+  result.setDate(result.getDate() - dayOfWeek);
+  return result;
+};
+
+// Utility function to get start and end of month
+const getMonthBounds = (date) => {
+  const startDate = new Date(date.getFullYear(), date.getMonth(), 1);
+  const endDate = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return { startDate, endDate };
+};
+
+// Helper function to get date range
+const getDateRange = (view, dateString) => {
+  const baseDate = createLocalDate(dateString);
+  let startDate, endDate;
+
+  switch (view) {
+    case 'day':
+      startDate = new Date(baseDate);
+      endDate = new Date(baseDate);
+      break;
+    case 'week':
+      startDate = getStartOfWeek(baseDate);
+      endDate = addDays(startDate, 6);
+      break;
+    case 'month':
+      ({ startDate, endDate } = getMonthBounds(baseDate));
+      break;
+    default:
+      throw new Error('Invalid view type');
+  }
+
+  return { startDate, endDate };
+};
+
+// Helper function to get today's date string in local timezone
+const getTodayString = () => {
+  const today = new Date();
+  return formatDate(today);
+};
+
+exports.getAvailabilityStatus = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { view = 'day', date = getTodayString() } = req.query;
+
+    // Find active availability for the doctor
+    const availability = await Availability.findOne({
+      doctor: doctorId,
+      isActive: true,
+      $or: [
+        { effectiveTo: { $exists: false } },
+        { effectiveTo: { $gte: new Date() } }
+      ]
+    });
+
+    if (!availability) {
+      return res.status(404).json({
+        success: false,
+        message: 'No availability configuration found for this doctor'
+      });
+    }
+
+    const { startDate, endDate } = getDateRange(view, date);
+    const result = {
+      view,
+      currentDate: date,
+      data: []
+    };
+
+    if (view === 'day') {
+      // Day view - show hourly slots
+      const targetDate = createLocalDate(date);
+      const dayOfWeek = getDayName(targetDate);
+
+      const dayAvailability = availability.getAvailableSlotsForDate(targetDate);
+
+      // Get all possible time slots for the day
+      const daySchedule = availability.schedule.find(s => s.day === dayOfWeek);
+      let totalSlots = 0;
+      let availableSlots = 0;
+
+      if (daySchedule) {
+        daySchedule.shifts.forEach(shift => {
+          if (shift.isActive) {
+            const slots = availability.generateTimeSlots(shift.startTime, shift.endTime);
+            totalSlots += slots.length * shift.consultationTypes.length;
+          }
+        });
+      }
+
+      // Count available slots
+      availableSlots = dayAvailability.clinic.slots.length + dayAvailability.video.slots.length;
+
+      result.data = [{
+        date: formatDate(targetDate),
+        day: dayOfWeek,
+        status: getStatusColor(availableSlots, totalSlots),
+        availableSlots,
+        totalSlots,
+        slots: {
+          clinic: dayAvailability.clinic,
+          video: dayAvailability.video
+        }
+      }];
+
+    } else if (view === 'week') {
+      // Week view - show each day of the week
+      for (let i = 0; i < 7; i++) {
+        const currentDate = addDays(startDate, i);
+        const dayOfWeek = getDayName(currentDate);
+        const dayAvailability = availability.getAvailableSlotsForDate(currentDate);
+
+        // Calculate total possible slots for this day
+        const daySchedule = availability.schedule.find(s => s.day === dayOfWeek);
+        let totalSlots = 0;
+
+        if (daySchedule) {
+          daySchedule.shifts.forEach(shift => {
+            if (shift.isActive) {
+              const slots = availability.generateTimeSlots(shift.startTime, shift.endTime);
+              totalSlots += slots.length * shift.consultationTypes.length;
+            }
+          });
+        }
+
+        const availableSlots = dayAvailability.clinic.slots.length + dayAvailability.video.slots.length;
+
+        result.data.push({
+          date: formatDate(currentDate),
+          day: dayOfWeek,
+          status: getStatusColor(availableSlots, totalSlots),
+          availableSlots,
+          totalSlots,
+          slots: {
+            clinic: dayAvailability.clinic,
+            video: dayAvailability.video
+          }
+        });
+      }
+
+    } else if (view === 'month') {
+      // Month view - show each day of the month
+      const currentDate = new Date(startDate);
+
+      while (currentDate <= endDate) {
+        const dayOfWeek = getDayName(currentDate);
+        const dayAvailability = availability.getAvailableSlotsForDate(currentDate);
+
+        // Calculate total possible slots for this day
+        const daySchedule = availability.schedule.find(s => s.day === dayOfWeek);
+        let totalSlots = 0;
+
+        if (daySchedule) {
+          daySchedule.shifts.forEach(shift => {
+            if (shift.isActive) {
+              const slots = availability.generateTimeSlots(shift.startTime, shift.endTime);
+              totalSlots += slots.length * shift.consultationTypes.length;
+            }
+          });
+        }
+
+        const availableSlots = dayAvailability.clinic.slots.length + dayAvailability.video.slots.length;
+
+        result.data.push({
+          date: formatDate(currentDate),
+          day: dayOfWeek,
+          status: getStatusColor(availableSlots, totalSlots),
+          availableSlots,
+          totalSlots,
+          summary: {
+            hasClinic: dayAvailability.clinic.slots.length > 0,
+            hasVideo: dayAvailability.video.slots.length > 0,
+            clinicCount: dayAvailability.clinic.slots.length,
+            videoCount: dayAvailability.video.slots.length
+          }
+        });
+
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Error fetching availability status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch availability status',
+      error: error.message
+    });
+  }
+};
+
 // Get doctor's available slots
 exports.getDoctorAvailableSlots = async (req, res) => {
   try {
     const { doctorId } = req.params;
     const { date, consultationType } = req.query;
-   
+
     if (!date) {
       return res.status(400).json({
         success: false,
         message: 'Date parameter is required'
       });
     }
-    
+
     const requestedDate = new Date(date);
     if (isNaN(requestedDate.getTime())) {
       return res.status(400).json({
@@ -212,7 +453,7 @@ exports.getDoctorAvailableSlots = async (req, res) => {
         message: 'Invalid date format'
       });
     }
-    
+
     const availability = await Availability.findOne({
       doctor: doctorId,
       isActive: true,
@@ -222,50 +463,50 @@ exports.getDoctorAvailableSlots = async (req, res) => {
         { effectiveTo: null }
       ]
     });
-    
+
     if (!availability) {
       return res.status(404).json({
         success: false,
         message: 'No availability found for this doctor on the specified date'
       });
     }
-    
-//     const availableSlots = availability.getAvailableSlotsForDate(requestedDate);
-    
-//     if (consultationType && ['clinic', 'video'].includes(consultationType)) {
-//       return res.status(200).json({
-//         success: true,
-//         data: {
-//           date: requestedDate,
-//           consultationType,
-//           slots: availableSlots[consultationType].slots,
-//           fee: availableSlots[consultationType].fee,
-//           slotDuration: availability.slotDuration
-//         }
-//       });
-//     } else {
-//       return res.status(200).json({
-//         success: true,
-//         data: {
-//           date: requestedDate,
-//           slotDuration: availability.slotDuration,
-//           clinic: {
-//             slots: availableSlots.clinic.slots,
-//             fee: availableSlots.clinic.fee
-//           },
-//           video: {
-//             slots: availableSlots.video.slots,
-//             fee: availableSlots.video.fee
-//           }
-//         }
-//       });
-//     }
-//   } catch (err) {
-//     console.error('Error in getDoctorAvailableSlots:', err);
-//     res.status(500).json({ success: false, message: 'Server Error', error: err.message });
-//   }
-// };
-const doctor = await Doctor.findById(doctorId); // ✅
+
+    //     const availableSlots = availability.getAvailableSlotsForDate(requestedDate);
+
+    //     if (consultationType && ['clinic', 'video'].includes(consultationType)) {
+    //       return res.status(200).json({
+    //         success: true,
+    //         data: {
+    //           date: requestedDate,
+    //           consultationType,
+    //           slots: availableSlots[consultationType].slots,
+    //           fee: availableSlots[consultationType].fee,
+    //           slotDuration: availability.slotDuration
+    //         }
+    //       });
+    //     } else {
+    //       return res.status(200).json({
+    //         success: true,
+    //         data: {
+    //           date: requestedDate,
+    //           slotDuration: availability.slotDuration,
+    //           clinic: {
+    //             slots: availableSlots.clinic.slots,
+    //             fee: availableSlots.clinic.fee
+    //           },
+    //           video: {
+    //             slots: availableSlots.video.slots,
+    //             fee: availableSlots.video.fee
+    //           }
+    //         }
+    //       });
+    //     }
+    //   } catch (err) {
+    //     console.error('Error in getDoctorAvailableSlots:', err);
+    //     res.status(500).json({ success: false, message: 'Server Error', error: err.message });
+    //   }
+    // };
+    const doctor = await Doctor.findById(doctorId); // ✅
     if (!doctor) {
       return res.status(404).json({
         success: false,
@@ -315,16 +556,16 @@ const doctor = await Doctor.findById(doctorId); // ✅
 // Get availability by ID
 exports.getAvailabilityById = async (req, res) => {
   try {
-    const availability = await Availability.findOne({doctor: req.user.doctorId})
+    const availability = await Availability.findOne({ doctor: req.user.doctorId })
       .populate('doctor', 'fullName specialization');
-    
+
     if (!availability) {
       return res.status(404).json({
         success: false,
         message: 'Availability not found'
       });
     }
-    
+
     res.status(200).json({
       success: true,
       data: availability
@@ -337,7 +578,7 @@ exports.getAvailabilityById = async (req, res) => {
         message: 'Invalid availability ID format'
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -356,7 +597,7 @@ exports.createAvailability = async (req, res) => {
         errors: errors.array()
       });
     }
-    
+
     const existingAvailability = await Availability.findOne({
       doctor: req.body.doctor,
       isActive: true,
@@ -366,14 +607,14 @@ exports.createAvailability = async (req, res) => {
         { effectiveTo: null }
       ]
     });
-    
+
     if (existingAvailability && !req.body.effectiveTo) {
       return res.status(400).json({
         success: false,
         message: 'Doctor already has an active availability schedule. Please update the existing one or set an end date for this new schedule.'
       });
     }
-    
+
     let hasValidConsultationTypes = false;
     if (req.body.schedule && Array.isArray(req.body.schedule)) {
       for (const daySchedule of req.body.schedule) {
@@ -388,17 +629,17 @@ exports.createAvailability = async (req, res) => {
         if (hasValidConsultationTypes) break;
       }
     }
-    
+
     if (!hasValidConsultationTypes) {
       return res.status(400).json({
         success: false,
         message: 'At least one shift must have consultation types defined'
       });
     }
-    
+
     const newAvailability = new Availability(req.body);
     await newAvailability.save();
-    
+
     res.status(201).json({
       success: true,
       data: newAvailability
@@ -412,7 +653,7 @@ exports.createAvailability = async (req, res) => {
         message: messages.join(', ')
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -431,22 +672,22 @@ exports.updateAvailability = async (req, res) => {
         errors: errors.array()
       });
     }
-    
-    const availabilityToUpdate = await Availability.findOne({doctor: req.user.doctorId});
-    
+
+    const availabilityToUpdate = await Availability.findOne({ doctor: req.user.doctorId });
+
     if (!availabilityToUpdate) {
       return res.status(404).json({
         success: false,
         message: 'Availability not found'
       });
     }
-    
+
     Object.keys(req.body).forEach(key => {
       availabilityToUpdate[key] = req.body[key];
     });
-    
+
     await availabilityToUpdate.save();
-    
+
     res.status(200).json({
       success: true,
       data: availabilityToUpdate
@@ -460,14 +701,14 @@ exports.updateAvailability = async (req, res) => {
         message: messages.join(', ')
       });
     }
-    
+
     if (error.kind === 'ObjectId') {
       return res.status(400).json({
         success: false,
         message: 'Invalid availability ID format'
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -480,27 +721,27 @@ exports.updateAvailability = async (req, res) => {
 exports.deleteAvailability = async (req, res) => {
   try {
     const availability = await Availability.findById(req.params.id);
-    
+
     if (!availability) {
       return res.status(404).json({
         success: false,
         message: 'Availability not found'
       });
     }
-    
-    const hasUpcomingAppointments = availability.bookedSlots.some(slot => 
+
+    const hasUpcomingAppointments = availability.bookedSlots.some(slot =>
       new Date(slot.date) > new Date() && slot.status === 'booked'
     );
-    
+
     if (hasUpcomingAppointments) {
       return res.status(400).json({
         success: false,
         message: 'Cannot delete availability with upcoming appointments'
       });
     }
-    
+
     await availability.deleteOne();
-    
+
     res.status(200).json({
       success: true,
       message: 'Availability deleted successfully'
@@ -513,7 +754,7 @@ exports.deleteAvailability = async (req, res) => {
         message: 'Invalid availability ID format'
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -539,25 +780,25 @@ function isSameDay(date1, date2) {
 // Add or modify override
 exports.addOverride = async (req, res) => {
   try {
-    const { 
-      date, 
-      isAvailable, 
-      startTime, 
-      endTime, 
-      consultationTypes, 
-      reason 
+    const {
+      date,
+      isAvailable,
+      startTime,
+      endTime,
+      consultationTypes,
+      reason
     } = req.body;
 
     console.log("-------------", req.body);
-   
-    const availability = await Availability.findOne({doctor: req.user.doctorId});
+
+    const availability = await Availability.findOne({ doctor: req.user.doctorId });
     if (!availability) {
       return res.status(404).json({
         success: false,
         message: 'Availability not found'
       });
     }
-   
+
     // Parse the target date
     const targetDate = new Date(date);
     if (isNaN(targetDate.getTime())) {
@@ -566,31 +807,31 @@ exports.addOverride = async (req, res) => {
         message: 'Invalid date format'
       });
     }
-    
+
     // Find if there's an existing override for this date
     const existingOverrideIndex = availability.overrides.findIndex(
       o => isSameDay(o.date, targetDate)
     );
-    
+
     let updatedOverride;
-    
+
     // If marking as unavailable with specific time range
     if (!isAvailable && startTime && endTime) {
       // Fetch the day's original schedule to create a modified version
       const dayOfWeek = getDayName(targetDate);
       const daySchedule = availability.schedule.find(s => s.day === dayOfWeek);
-      
+
       if (!daySchedule) {
         return res.status(400).json({
           success: false,
           message: 'No schedule found for this day of week'
         });
       }
-      
+
       // If there's an existing override for this date
       if (existingOverrideIndex !== -1) {
         const currentOverride = availability.overrides[existingOverrideIndex];
-        
+
         // If the override already marks the day as unavailable, return error
         if (!currentOverride.isAvailable) {
           return res.status(400).json({
@@ -598,17 +839,17 @@ exports.addOverride = async (req, res) => {
             message: 'This date is already marked as unavailable'
           });
         }
-        
+
         // Modify the shifts in the existing override to exclude the unavailable time range
         const updatedShifts = [];
-        
+
         for (const shift of currentOverride.shifts) {
           // If shift ends before unavailable time starts or starts after unavailable time ends
           if (shift.endTime <= startTime || shift.startTime >= endTime) {
             updatedShifts.push(shift);
             continue;
           }
-          
+
           // If unavailable time is in the middle of the shift, split it
           if (shift.startTime < startTime && shift.endTime > endTime) {
             // First part of split
@@ -617,7 +858,7 @@ exports.addOverride = async (req, res) => {
               endTime: startTime,
               consultationTypes: shift.consultationTypes
             });
-            
+
             // Second part of split
             updatedShifts.push({
               startTime: endTime,
@@ -626,7 +867,7 @@ exports.addOverride = async (req, res) => {
             });
             continue;
           }
-          
+
           // If unavailable time overlaps with start of shift
           if (shift.startTime < endTime && endTime < shift.endTime) {
             updatedShifts.push({
@@ -636,7 +877,7 @@ exports.addOverride = async (req, res) => {
             });
             continue;
           }
-          
+
           // If unavailable time overlaps with end of shift
           if (shift.startTime < startTime && startTime < shift.endTime) {
             updatedShifts.push({
@@ -647,7 +888,7 @@ exports.addOverride = async (req, res) => {
             continue;
           }
         }
-        
+
         // Update the override
         updatedOverride = {
           date: targetDate,
@@ -658,10 +899,10 @@ exports.addOverride = async (req, res) => {
       } else {
         // Create a new override based on the day's schedule
         const newShifts = [];
-        
+
         for (const shift of daySchedule.shifts) {
           if (!shift.isActive) continue;
-          
+
           // If shift ends before unavailable time starts or starts after unavailable time ends
           if (shift.endTime <= startTime || shift.startTime >= endTime) {
             newShifts.push({
@@ -671,7 +912,7 @@ exports.addOverride = async (req, res) => {
             });
             continue;
           }
-          
+
           // If unavailable time is in the middle of the shift, split it
           if (shift.startTime < startTime && shift.endTime > endTime) {
             // First part of split
@@ -680,7 +921,7 @@ exports.addOverride = async (req, res) => {
               endTime: startTime,
               consultationTypes: shift.consultationTypes
             });
-            
+
             // Second part of split
             newShifts.push({
               startTime: endTime,
@@ -689,7 +930,7 @@ exports.addOverride = async (req, res) => {
             });
             continue;
           }
-          
+
           // If unavailable time overlaps with start of shift
           if (shift.startTime < endTime && endTime < shift.endTime) {
             newShifts.push({
@@ -699,7 +940,7 @@ exports.addOverride = async (req, res) => {
             });
             continue;
           }
-          
+
           // If unavailable time overlaps with end of shift
           if (shift.startTime < startTime && startTime < shift.endTime) {
             newShifts.push({
@@ -710,7 +951,7 @@ exports.addOverride = async (req, res) => {
             continue;
           }
         }
-        
+
         updatedOverride = {
           date: targetDate,
           isAvailable: true, // Available with modified shifts
@@ -728,7 +969,7 @@ exports.addOverride = async (req, res) => {
           message: 'At least one consultation type must be provided for available slots'
         });
       }
-      
+
       // Validate each consultation type
       for (const ct of consultationTypes) {
         if (!ct.type || !['clinic', 'video'].includes(ct.type)) {
@@ -737,14 +978,14 @@ exports.addOverride = async (req, res) => {
             message: 'Invalid consultation type. Must be "clinic" or "video"'
           });
         }
-        
+
         // if (typeof ct.fee !== 'number' || ct.fee < 0) {
         //   return res.status(400).json({
         //     success: false,
         //     message: 'Each consultation type must have a valid fee'
         //   });
         // }
-        
+
         // if (ct.maxPatients !== undefined && (typeof ct.maxPatients !== 'number' || ct.maxPatients < 1)) {
         //   return res.status(400).json({
         //     success: false,
@@ -752,16 +993,16 @@ exports.addOverride = async (req, res) => {
         //   });
         // }
       }
-      
+
       const newShift = {
         startTime,
         endTime,
         consultationTypes
       };
-      
+
       if (existingOverrideIndex !== -1) {
         const currentOverride = availability.overrides[existingOverrideIndex];
-        
+
         // If day is already marked unavailable, change it to available
         if (!currentOverride.isAvailable) {
           updatedOverride = {
@@ -773,25 +1014,25 @@ exports.addOverride = async (req, res) => {
         } else {
           // Check for overlapping shifts in existing override
           const shifts = [...currentOverride.shifts];
-          
+
           // Add the new shift
           shifts.push(newShift);
-          
+
           // Sort shifts by start time
-          const sortedShifts = shifts.sort((a, b) => 
+          const sortedShifts = shifts.sort((a, b) =>
             a.startTime.localeCompare(b.startTime)
           );
-          
+
           // Check for overlaps
           for (let i = 1; i < sortedShifts.length; i++) {
-            if (sortedShifts[i].startTime < sortedShifts[i-1].endTime) {
+            if (sortedShifts[i].startTime < sortedShifts[i - 1].endTime) {
               return res.status(400).json({
                 success: false,
                 message: 'New shift overlaps with existing shifts'
               });
             }
           }
-          
+
           updatedOverride = {
             date: targetDate,
             isAvailable: true,
@@ -822,15 +1063,15 @@ exports.addOverride = async (req, res) => {
             });
           }
         }
-       
+
         // Check for overlapping shifts
         if (shifts.length > 1) {
           const sortedShifts = [...shifts].sort((a, b) =>
             a.startTime.localeCompare(b.startTime)
           );
-         
+
           for (let i = 1; i < sortedShifts.length; i++) {
-            if (sortedShifts[i].startTime < sortedShifts[i-1].endTime) {
+            if (sortedShifts[i].startTime < sortedShifts[i - 1].endTime) {
               return res.status(400).json({
                 success: false,
                 message: 'Shifts cannot overlap'
@@ -839,7 +1080,7 @@ exports.addOverride = async (req, res) => {
           }
         }
       }
-     
+
       updatedOverride = {
         date: targetDate,
         isAvailable,
@@ -847,16 +1088,16 @@ exports.addOverride = async (req, res) => {
         reason
       };
     }
-    
+
     // Update or add the override to the availability
     if (existingOverrideIndex !== -1) {
       availability.overrides[existingOverrideIndex] = updatedOverride;
     } else {
       availability.overrides.push(updatedOverride);
     }
-   
+
     await availability.save();
-   
+
     res.status(200).json({
       success: true,
       message: 'Availability modified successfully',
@@ -877,14 +1118,14 @@ exports.removeOverride = async (req, res) => {
   try {
     const { date } = req.params;
     const targetDate = new Date(date);
-    
+
     if (isNaN(targetDate.getTime())) {
       return res.status(400).json({
         success: false,
         message: 'Invalid date format'
       });
     }
-    
+
     const availability = await Availability.findById(req.params.id);
     if (!availability) {
       return res.status(404).json({
@@ -892,21 +1133,21 @@ exports.removeOverride = async (req, res) => {
         message: 'Availability not found'
       });
     }
-    
+
     const overrideIndex = availability.overrides.findIndex(
       o => isSameDay(o.date, targetDate)
     );
-    
+
     if (overrideIndex === -1) {
       return res.status(404).json({
         success: false,
         message: 'Override not found for the specified date'
       });
     }
-    
+
     availability.overrides.splice(overrideIndex, 1);
     await availability.save();
-    
+
     res.status(200).json({
       success: true,
       message: 'Override removed successfully',
@@ -920,7 +1161,7 @@ exports.removeOverride = async (req, res) => {
         message: 'Invalid availability ID format'
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -934,7 +1175,7 @@ exports.updateBookedSlotStatus = async (req, res) => {
   try {
     const { id, slotId } = req.params;
     const { status } = req.body;
-    
+
     const availability = await Availability.findById(id);
     if (!availability) {
       return res.status(404).json({
@@ -942,7 +1183,7 @@ exports.updateBookedSlotStatus = async (req, res) => {
         message: 'Availability not found'
       });
     }
-    
+
     const bookedSlot = availability.bookedSlots.id(slotId);
     if (!bookedSlot) {
       return res.status(404).json({
@@ -950,24 +1191,24 @@ exports.updateBookedSlotStatus = async (req, res) => {
         message: 'Booked slot not found'
       });
     }
-    
+
     const validTransitions = {
       'booked': ['completed', 'cancelled', 'no_show'],
       'completed': [],
       'cancelled': [],
       'no_show': []
     };
-    
+
     if (!validTransitions[bookedSlot.status].includes(status) && bookedSlot.status !== status) {
       return res.status(400).json({
         success: false,
         message: `Cannot transition from ${bookedSlot.status} to ${status}`
       });
     }
-    
+
     bookedSlot.status = status;
     await availability.save();
-    
+
     res.status(200).json({
       success: true,
       message: 'Slot status updated successfully',
@@ -981,7 +1222,7 @@ exports.updateBookedSlotStatus = async (req, res) => {
         message: 'Invalid ID format'
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -995,7 +1236,7 @@ exports.bookSlot = async (req, res) => {
   try {
     const { id } = req.params;
     const { date, startTime, consultationType, appointmentId } = req.body;
-    
+
     const availability = await Availability.findById(id);
     if (!availability) {
       return res.status(404).json({
@@ -1003,7 +1244,7 @@ exports.bookSlot = async (req, res) => {
         message: 'Availability not found'
       });
     }
-    
+
     const doctor = await Doctor.findById(availability.doctor);
     if (!doctor) {
       return res.status(404).json({
@@ -1011,24 +1252,24 @@ exports.bookSlot = async (req, res) => {
         message: 'Doctor not found'
       });
     }
-    
+
     if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid appointment ID format'
       });
     }
-    
+
     if (!availability.isSlotAvailable(date, startTime, consultationType)) {
       return res.status(400).json({
         success: false,
         message: 'Slot is not available'
       });
     }
-    
+
     try {
       const result = await availability.bookSlot(date, startTime, consultationType, appointmentId);
-      
+
       res.status(200).json({
         success: true,
         message: 'Slot booked successfully',
@@ -1055,7 +1296,7 @@ exports.bookSlot = async (req, res) => {
         message: 'Invalid ID format'
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Server error',
