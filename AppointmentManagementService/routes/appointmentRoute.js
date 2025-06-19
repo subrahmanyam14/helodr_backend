@@ -35,9 +35,10 @@ appointmentRouter.get('/doctor/:doctorId/upcoming/clinic', appointmentController
 // Get cancelled appointments
 appointmentRouter.get('/doctor/:doctorId/cancelled', appointmentController.getCancelledAppointments);
 
+appointmentRouter.get('/doctors/:doctorId/patients/analytics', appointmentController.getDoctorPatientsAnalytics);
 
 // get patients assigned to a doctor
-appointmentRouter.get('/doctors/patients', appointmentController.getDoctorPatients)
+appointmentRouter.get('/doctors/:doctorId/patients', appointmentController.getDoctorPatients);
 
 //doctor get particular patient's details by his id 
 appointmentRouter.get('/doctors/:doctorId/patients/:id', appointmentController.getDoctorPatientById)

@@ -816,169 +816,357 @@ exports.getCancelledAppointments = async (req, res) => {
   }
 };
 
-exports.getDoctorPatients = async (req, res) => {
+exports.getDoctorPatientsAnalytics = async (req, res) => {
   try {
-    const doctorId = req.body;
-    const { search = "", page = 1, limit = 10 } = req.query;
+    const { doctorId } = req.params;
 
-    if (!doctorId) {
+    // Validate doctor ID
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
       return res.status(400).json({
         success: false,
-        message: "Doctor ID is required"
+        message: 'Invalid doctor ID'
       });
     }
 
-    const query = {
-      doctor: doctorId,
-      status: { $in: ['booked', 'completed'] }
+    // Get all appointments for this doctor
+    const appointments = await Appointment.find({ doctor: doctorId });
+
+    if (appointments.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          totalPatients: 0,
+          averageRating: 0,
+          totalReviews: 0,
+          todayAppointments: 0,
+          clinicAppointments: {
+            total: 0,
+            completed: 0,
+            pending: 0,
+            confirmed: 0,
+            cancelled: 0,
+            noShow: 0,
+            rescheduled: 0
+          },
+          videoAppointments: {
+            total: 0,
+            completed: 0,
+            pending: 0,
+            confirmed: 0,
+            cancelled: 0,
+            noShow: 0,
+            rescheduled: 0
+          }
+        }
+      });
+    }
+
+    // Get unique patient IDs
+    const uniquePatientIds = [...new Set(appointments.map(apt => apt.patient.toString()))];
+    const totalPatients = uniquePatientIds.length;
+
+    // Clinic Appointments analytics
+    const clinicVisitAppointments = appointments.filter(apt => apt.appointmentType === 'clinic');
+    const clinicAppointments = {
+      total: clinicVisitAppointments.length,
+      completed: clinicVisitAppointments.filter(apt => apt.status === 'completed').length,
+      pending: clinicVisitAppointments.filter(apt => apt.status === 'pending').length,
+      confirmed: clinicVisitAppointments.filter(apt => apt.status === 'confirmed').length,
+      cancelled: clinicVisitAppointments.filter(apt => apt.status === 'cancelled').length,
+      noShow: clinicVisitAppointments.filter(apt => apt.status === 'no_show').length,
+      rescheduled: clinicVisitAppointments.filter(apt => apt.status === 'rescheduled').length
     };
 
-    // Aggregate unique patient info from appointments
-    const aggregatePipeline = [
-      { $match: query },
+    // Video Appointments analytics
+    const videoCallAppointments = appointments.filter(apt => apt.appointmentType === 'video');
+    const videoAppointments = {
+      total: videoCallAppointments.length,
+      completed: videoCallAppointments.filter(apt => apt.status === 'completed').length,
+      pending: videoCallAppointments.filter(apt => apt.status === 'pending').length,
+      confirmed: videoCallAppointments.filter(apt => apt.status === 'confirmed').length,
+      cancelled: videoCallAppointments.filter(apt => apt.status === 'cancelled').length,
+      noShow: videoCallAppointments.filter(apt => apt.status === 'no_show').length,
+      rescheduled: videoCallAppointments.filter(apt => apt.status === 'rescheduled').length
+    };
+
+    // Rating analytics
+    const reviewedAppointments = appointments.filter(apt => apt.review && apt.review.rating);
+    const totalReviews = reviewedAppointments.length;
+    const averageRating = totalReviews > 0
+      ? (reviewedAppointments.reduce((sum, apt) => sum + apt.review.rating, 0) / totalReviews).toFixed(1)
+      : 0;
+
+    // Time-based analytics - only today
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const todayAppointments = appointments.filter(apt =>
+      new Date(apt.date) >= startOfToday && new Date(apt.date) < new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000)
+    ).length;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalPatients,
+        averageRating: parseFloat(averageRating),
+        totalReviews,
+        todayAppointments,
+        clinicAppointments,
+        videoAppointments
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in getDoctorPatientsAnalytics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// 2. Get Doctor's Patients with Pagination
+exports.getDoctorPatients = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { page = 1, limit = 10, search = '', sortBy = 'date', sortOrder = 'desc' } = req.query;
+
+    // Validate doctor ID
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid doctor ID'
+      });
+    }
+
+    // Convert page and limit to numbers
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build search query for appointments
+    let matchQuery = { doctor: new mongoose.Types.ObjectId(doctorId) };
+
+    // Aggregation pipeline to get appointments with patient details
+    const pipeline = [
+      { $match: matchQuery },
+      
+      // Lookup patient details
       {
         $lookup: {
           from: 'users',
           localField: 'patient',
           foreignField: '_id',
-          as: 'patientInfo'
+          as: 'patientDetails'
         }
       },
-      { $unwind: '$patientInfo' },
-      {
-        $group: {
-          _id: '$patient',
-          name: { $first: '$patientInfo.name' },
-          email: { $first: '$patientInfo.email' },
-          age: { $first: '$patientInfo.age' },
-          gender: { $first: '$patientInfo.gender' },
-          lastVisit: { $max: '$date' },
-          condition: { $first: '$reason' }, // assuming 'reason' field represents condition
-          assignedDoctor: { $first: '$doctor' }
-        }
-      },
-      {
+      
+      // Unwind patient details
+      { $unwind: '$patientDetails' },
+      
+      // Add search functionality if provided
+      ...(search ? [{
         $match: {
           $or: [
-            { name: { $regex: search, $options: 'i' } },
-            { email: { $regex: search, $options: 'i' } }
+            { 'patientDetails.fullName': { $regex: search, $options: 'i' } },
+            { 'patientDetails.email': { $regex: search, $options: 'i' } },
+            { 'patientDetails.mobileNumber': { $regex: search, $options: 'i' } },
+            { reason: { $regex: search, $options: 'i' } }
           ]
         }
-      },
+      }] : []),
+      
+      // Project only necessary appointment and patient fields
       {
-        $sort: { lastVisit: -1 }
-      },
-      {
-        $skip: (parseInt(page) - 1) * parseInt(limit)
-      },
-      {
-        $limit: parseInt(limit)
-      }
-    ];
-
-    const countPipeline = [
-      { $match: query },
-      {
-        $group: {
-          _id: '$patient'
+        $project: {
+          _id: 1,
+          patient: {
+            _id: '$patientDetails._id',
+            fullName: '$patientDetails.fullName',
+            email: '$patientDetails.email',
+            mobileNumber: '$patientDetails.mobileNumber',
+            profilePhoto: '$patientDetails.profilePhoto'
+          },
+          appointmentType: 1,
+          date: 1,
+          slot: {
+            startTime: 1,
+            endTime: 1
+          },
+          reason: 1,
+          status: 1,
+          videoConferenceLink: 1,
+          prescription: {
+            diagnosis: 1,
+            medicines: 1,
+            tests: 1,
+            advice: 1,
+            followUpDate: 1
+          },
+          review: {
+            rating: 1,
+            feedback: 1,
+            aspects: 1
+          },
+          followUp: {
+            isRequired: 1,
+            date: 1
+          },
+          cancellation: {
+            initiatedBy: 1,
+            reason: 1,
+            cancelledAt: 1
+          },
+          rescheduledFrom: 1,
+          createdAt: 1,
+          updatedAt: 1
         }
-      },
-      {
-        $count: 'totalCount'
       }
     ];
 
-    const [patients, totalCountResult] = await Promise.all([
-      Appointment.aggregate(aggregatePipeline),
-      Appointment.aggregate(countPipeline)
-    ]);
+    // Add sorting
+    const sortStage = {};
+    if (sortBy === 'date') {
+      sortStage.date = sortOrder === 'desc' ? -1 : 1;
+    } else if (sortBy === 'status') {
+      sortStage.status = sortOrder === 'desc' ? -1 : 1;
+    } else if (sortBy === 'patientName') {
+      sortStage['patient.fullName'] = sortOrder === 'desc' ? -1 : 1;
+    } else if (sortBy === 'appointmentType') {
+      sortStage.appointmentType = sortOrder === 'desc' ? -1 : 1;
+    } else {
+      sortStage.date = -1; // default sort by date descending
+    }
 
-    const totalCount = totalCountResult[0]?.totalCount || 0;
+    pipeline.push({ $sort: sortStage });
 
-    res.json({
-      patients: patients.map(p => ({
-        id: p._id,
-        name: p.name,
-        email: p.email,
-        age: p.age,
-        gender: p.gender,
-        lastVisit: p.lastVisit,
-        condition: p.condition,
-        assignedDoctor: p.assignedDoctor
-      })),
-      totalCount,
-      page: parseInt(page)
+    // Get total count for pagination
+    const countPipeline = [...pipeline];
+    countPipeline.push({ $count: 'total' });
+    const countResult = await Appointment.aggregate(countPipeline);
+    const totalAppointments = countResult.length > 0 ? countResult[0].total : 0;
+
+    // Add pagination
+    pipeline.push({ $skip: skip });
+    pipeline.push({ $limit: limitNum });
+
+    // Execute aggregation
+    const appointments = await Appointment.aggregate(pipeline);
+
+    const totalPages = Math.ceil(totalAppointments / limitNum);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        appointments,
+        pagination: {
+          currentPage: pageNum,
+          totalPages,
+          totalAppointments,
+          hasNextPage: pageNum < totalPages,
+          hasPrevPage: pageNum > 1,
+          limit: limitNum
+        }
+      }
     });
 
   } catch (error) {
-    console.error("Error fetching patients:", error);
+    console.error('Error in getDoctorPatients:', error);
     res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: 'Internal server error',
+      error: error.message
     });
   }
 };
 
+// 3. Get Specific Patient Details for Doctor
 exports.getDoctorPatientById = async (req, res) => {
   try {
-    const doctorId = req.params.doctorId?.trim();
-    const patientId = req.params.id?.trim();
+    const { doctorId, id: patientId } = req.params;
 
-    if (!doctorId) {
-      return res.status(400).json({ success: false, message: "Doctor ID missing" });
-    }
-
-    // Check if this doctor has had appointments with the patient
-    const hasAccess = await Appointment.exists({
-      doctor: doctorId,
-      patient: patientId,
-      status: { $in: ['booked', 'completed'] }
-    });
-
-    if (!hasAccess) {
-      return res.status(403).json({
+    // Validate IDs
+    if (!mongoose.Types.ObjectId.isValid(doctorId) || !mongoose.Types.ObjectId.isValid(patientId)) {
+      return res.status(400).json({
         success: false,
-        message: "You do not have access to this patient's details"
+        message: 'Invalid doctor ID or patient ID'
       });
     }
 
-    // Get patient profile
-    const patient = await User.findById(patientId).select(
-      'name email age gender address bloodGroup allergies medicalHistory emergencyContact'
-    );
+    // Find the patient with all details
+    const patient = await User.findOne({
+      _id: patientId,
+      role: 'patient'
+    })
+    .populate('doctorId', 'fullName email mobileNumber')
+    .populate('medicalRecords.doctorId', 'fullName')
 
     if (!patient) {
-      return res.status(404).json({ success: false, message: "Patient not found" });
+      return res.status(404).json({
+        success: false,
+        message: 'Patient not found or not assigned to this doctor'
+      });
     }
 
-    // Get past appointments
-    const pastAppointments = await Appointment.find({
-      doctor: doctorId,
-      patient: patientId,
-      status: { $in: ['completed', 'booked'] }
-    }).sort({ date: -1 }).select('date diagnosis prescription');
+    // Prepare complete patient data
+    const patientData = {
+      // Basic Information
+      _id: patient._id,
+      fullName: patient.fullName,
+      email: patient.email,
+      countryCode: patient.countryCode,
+      mobileNumber: patient.mobileNumber,
+      
+      // Personal Details
+      gender: patient.gender,
+      dateOfBirth: patient.dateOfBirth,
+      age: patient.age, // Virtual field
+      bloodGroup: patient.bloodGroup,
+      
+      // Account Information
+      role: patient.role,
+      isEmailVerified: patient.isEmailVerified,
+      isMobileVerified: patient.isMobileVerified,
+      promoConsent: patient.promoConsent,
+      profilePhoto: patient.profilePhoto,
+      
+      // Address Information
+      address: {
+        addressLine1: patient.addressLine1,
+        addressLine2: patient.addressLine2,
+        city: patient.city,
+        state: patient.state,
+        pinCode: patient.pinCode,
+        country: patient.country
+      },
+      
+      medicalRecords: patient.medicalRecords.map(record => ({
+        _id: record._id,
+        type: record.type,
+        doctorId: record.doctorId,
+        date: record.date,
+        url: record.url,
+        description: record.description
+      })),
+      
+      // Timestamps
+      createdAt: patient.createdAt,
+      updatedAt: patient.updatedAt
+    };
 
-    res.json({
-      patient: {
-        id: patient._id,
-        name: patient.name,
-        email: patient.email,
-        age: patient.age,
-        gender: patient.gender,
-        address: patient.address,
-        bloodGroup: patient.bloodGroup,
-        allergies: patient.allergies,
-        medicalHistory: patient.medicalHistory,
-        emergencyContact: patient.emergencyContact,
-        pastAppointments
-      }
+    return res.status(200).json({
+      success: true,
+      message: 'Patient details retrieved successfully',
+      data: patientData
     });
 
   } catch (error) {
-    console.error("Error fetching patient details:", error);
-    res.status(500).json({
+    console.error('Error fetching patient details:', error);
+    return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
