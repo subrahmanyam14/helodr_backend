@@ -104,6 +104,7 @@ exports.login = async (req, res) => {
       }
       else{
         additionData.status = "profile_in_active_status";
+        additionData.specializations = doctor.specializations;
         additionData.message = "No remarks.";
       }
     }
