@@ -38,7 +38,7 @@ const upcomingEarningsSchema = new mongoose.Schema({
 });
 
 // Static method to create upcoming earnings record
-upcomingEarningsSchema.statics.createUpcomingEarning = async function(data, session = null) {
+upcomingEarningsSchema.statics.createUpcomingEarning = async function (data, session = null) {
     try {
         const options = session ? { session } : {};
         const upcomingEarning = new this(data);
@@ -51,10 +51,10 @@ upcomingEarningsSchema.statics.createUpcomingEarning = async function(data, sess
 };
 
 // Static method to get total upcoming earnings for a doctor
-upcomingEarningsSchema.statics.getTotalUpcomingEarnings = async function(doctorId) {
+upcomingEarningsSchema.statics.getTotalUpcomingEarnings = async function (doctorId) {
     try {
         const result = await this.aggregate([
-            { $match: { doctor: mongoose.Types.ObjectId(doctorId), status: "pending" } },
+            { $match: { doctor: new mongoose.Types.ObjectId(doctorId), status: "pending" } },
             { $group: { _id: null, total: { $sum: "$amount" } } }
         ]);
         return result.length > 0 ? result[0].total : 0;
@@ -65,14 +65,14 @@ upcomingEarningsSchema.statics.getTotalUpcomingEarnings = async function(doctorI
 };
 
 // Method to process the earning (move to wallet)
-upcomingEarningsSchema.methods.processEarning = async function(session = null) {
+upcomingEarningsSchema.methods.processEarning = async function (session = null) {
     const options = session ? { session } : {};
     const Wallet = mongoose.model("Wallet");
-    
+
     try {
         // Find the doctor's wallet
         let wallet = await Wallet.findOne({ doctor: this.doctor }).session(session);
-        
+
         if (!wallet) {
             // Create new wallet if it doesn't exist
             wallet = new Wallet({
@@ -81,7 +81,7 @@ upcomingEarningsSchema.methods.processEarning = async function(session = null) {
                 total_earned: 0
             });
         }
-        
+
         // Add the pending amount to the wallet
         await wallet.addFunds(
             this.amount,
@@ -90,11 +90,11 @@ upcomingEarningsSchema.methods.processEarning = async function(session = null) {
             this.payment,
             session
         );
-        
+
         // Update status to credited
         this.status = "credited";
         await this.save(options);
-        
+
         return {
             success: true,
             wallet,

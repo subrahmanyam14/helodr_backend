@@ -1,6 +1,8 @@
 const Wallet = require("../models/Wallet");
 const Transaction = require("../models/Transaction");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
+const { default: mongoose } = require("mongoose");
+const Payment = require("../models/Payment");
 
 const getDoctorRevenue = async (req, res) => {
   try {
@@ -22,7 +24,7 @@ const getDoctorRevenue = async (req, res) => {
     const lastMonthTransactions = await Transaction.aggregate([
       {
         $match: {
-          user: doctorId,
+          user: new mongoose.Types.ObjectId(doctorId),
           type: "doctor_credit",
           status: "completed",
           createdAt: { $gte: oneMonthAgo }
@@ -76,7 +78,7 @@ const getWalletSummary = async (req, res) => {
     const todayCollection = await Transaction.aggregate([
       {
         $match: {
-          user: doctorId,
+          user: new mongoose.Types.ObjectId(doctorId),
           type: "doctor_credit",
           status: "completed",
           createdAt: {
@@ -142,7 +144,7 @@ const getFinancialSummary = async (req, res) => {
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
     const weeklyTransactions = await Transaction.find({
-      user: doctorId,
+      user: new mongoose.Types.ObjectId(doctorId),
       type: "doctor_credit",
       status: "completed",
       createdAt: { $gte: oneWeekAgo }
@@ -180,31 +182,341 @@ const getFinancialSummary = async (req, res) => {
   }
 }
 
-const getTransactionHistory = 
-async (req, res) => {
+const getFinancialData = async (req, res) => {
   try {
-    const { doctorId } = req.user;
+    const doctorId = req.user.doctorId;
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
 
-    if (!doctorId) {
-      return res.status(400).json({ message: "Doctor ID is required" });
-    }
+    // Get current month boundaries
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
-    // Get all successful credit transactions
-    const transactions = await Transaction.find({
-      user: doctorId,
-      type: "doctor_credit",
-      status: "completed"
-    }).sort({ createdAt: -1 }); // Most recent first
+    // Get last month boundaries for comparison
+    const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-    res.status(200).json(transactions);
+    // 1. Get Wallet Information
+    const wallet = await Wallet.findOne({ doctor: doctorId });
+
+    // 2. Get Today's Transactions
+    const todaysTransactions = await Transaction.find({
+      user: new mongoose.Types.ObjectId(doctorId),
+      createdAt: {
+        $gte: startOfDay,
+        $lt: endOfDay
+      }
+    })
+      .populate('referenceId')
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    // 3. Get Recent Transactions (Last 10)
+    const recentTransactions = await Transaction.find({
+      user: new mongoose.Types.ObjectId(doctorId)
+    })
+      .populate('referenceId')
+      .sort({ createdAt: -1 })
+      .limit(10);
+
+    // 4. Get Today's Analytics
+    const todaysAnalytics = await Transaction.aggregate([
+      {
+        $match: {
+          user: new mongoose.Types.ObjectId(doctorId),
+          createdAt: {
+            $gte: startOfDay,
+            $lt: endOfDay
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$type",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // 5. Get Monthly Analytics
+    const monthlyAnalytics = await Transaction.aggregate([
+      {
+        $match: {
+          user: new mongoose.Types.ObjectId(doctorId),
+          createdAt: {
+            $gte: startOfMonth,
+            $lt: endOfMonth
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$type",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // 6. Get Last Month Analytics for comparison
+    const lastMonthAnalytics = await Transaction.aggregate([
+      {
+        $match: {
+          user: new mongoose.Types.ObjectId(doctorId),
+          createdAt: {
+            $gte: startOfLastMonth,
+            $lt: endOfLastMonth
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$type",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // 7. Get Upcoming Earnings
+    const upcomingEarnings = await UpcomingEarnings.find({
+      doctor: doctorId,
+      status: "pending"
+    })
+      .populate('appointment')
+      .populate('payment')
+      .sort({ scheduledDate: 1 })
+      .limit(10);
+
+    // 8. Get Total Upcoming Earnings
+    const totalUpcomingEarnings = await UpcomingEarnings.getTotalUpcomingEarnings(doctorId);
+
+    // 9. Get Payment Statistics
+    const paymentStats = await Payment.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(doctorId),
+          createdAt: {
+            $gte: startOfMonth,
+            $lt: endOfMonth
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$status",
+          total: { $sum: "$totalamount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // 10. Calculate Growth Percentages
+    const calculateGrowth = (current, previous) => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return ((current - previous) / previous) * 100;
+    };
+
+    // Process analytics data
+    const processAnalytics = (analytics) => {
+      return analytics.reduce((acc, item) => {
+        acc[item._id] = {
+          total: item.total,
+          count: item.count
+        };
+        return acc;
+      }, {});
+    };
+
+    const todaysData = processAnalytics(todaysAnalytics);
+    const monthlyData = processAnalytics(monthlyAnalytics);
+    const lastMonthData = processAnalytics(lastMonthAnalytics);
+
+    // 11. Calculate today's totals
+    const todaysTotals = {
+      totalEarnings: todaysData.doctor_credit?.total || 0,
+      totalTransactions: todaysTransactions.length,
+      totalWithdrawals: todaysData.withdrawal_processed?.total || 0,
+      totalRefunds: todaysData.refund?.total || 0
+    };
+
+    // 12. Calculate monthly totals and growth
+    const monthlyTotals = {
+      totalEarnings: monthlyData.doctor_credit?.total || 0,
+      totalWithdrawals: monthlyData.withdrawal_processed?.total || 0,
+      totalRefunds: monthlyData.refund?.total || 0,
+      totalTransactions: Object.values(monthlyData).reduce((sum, item) => sum + item.count, 0)
+    };
+
+    const lastMonthTotals = {
+      totalEarnings: lastMonthData.doctor_credit?.total || 0,
+      totalWithdrawals: lastMonthData.withdrawal_processed?.total || 0,
+      totalRefunds: lastMonthData.refund?.total || 0,
+      totalTransactions: Object.values(lastMonthData).reduce((sum, item) => sum + item.count, 0)
+    };
+
+    // 13. Calculate growth percentages
+    const growthMetrics = {
+      earningsGrowth: calculateGrowth(monthlyTotals.totalEarnings, lastMonthTotals.totalEarnings),
+      transactionsGrowth: calculateGrowth(monthlyTotals.totalTransactions, lastMonthTotals.totalTransactions),
+      withdrawalsGrowth: calculateGrowth(monthlyTotals.totalWithdrawals, lastMonthTotals.totalWithdrawals)
+    };
+
+    // 14. Get Weekly Earnings Chart Data (Last 7 days)
+    const weeklyEarnings = await Transaction.aggregate([
+      {
+        $match: {
+          user: new mongoose.Types.ObjectId(doctorId),
+          type: "doctor_credit",
+          createdAt: {
+            $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+          }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: {
+              format: "%Y-%m-%d",
+              date: "$createdAt"
+            }
+          },
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    // 15. Response structure
+    const responseData = {
+      success: true,
+      data: {
+        // Wallet Information
+        wallet: {
+          currentBalance: wallet?.current_balance || 0,
+          totalEarned: wallet?.total_earned || 0,
+          totalWithdrawn: wallet?.total_withdrawn || 0,
+          totalSpent: wallet?.total_spent || 0,
+          commissionRate: wallet?.commission_rate || 20,
+          lastPaymentDate: wallet?.last_payment_date,
+          lastWithdrawalDate: wallet?.last_withdrawal_date
+        },
+
+        // Today's Summary
+        todaysSummary: {
+          ...todaysTotals,
+          date: today.toISOString().split('T')[0]
+        },
+
+        // Monthly Summary with Growth
+        monthlySummary: {
+          ...monthlyTotals,
+          ...growthMetrics,
+          month: today.toISOString().substr(0, 7)
+        },
+
+        // Today's Transactions
+        todaysTransactions: todaysTransactions.map(transaction => ({
+          id: transaction._id,
+          type: transaction.type,
+          amount: transaction.amount,
+          status: transaction.status,
+          referenceType: transaction.referenceType,
+          notes: transaction.notes,
+          createdAt: transaction.createdAt,
+          metadata: transaction.metadata
+        })),
+
+        // Recent Transactions
+        recentTransactions: recentTransactions.map(transaction => ({
+          id: transaction._id,
+          type: transaction.type,
+          amount: transaction.amount,
+          status: transaction.status,
+          referenceType: transaction.referenceType,
+          notes: transaction.notes,
+          createdAt: transaction.createdAt,
+          metadata: transaction.metadata
+        })),
+
+        // Upcoming Earnings
+        upcomingEarnings: {
+          total: totalUpcomingEarnings,
+          items: upcomingEarnings.map(earning => ({
+            id: earning._id,
+            amount: earning.amount,
+            scheduledDate: earning.scheduledDate,
+            status: earning.status,
+            appointmentId: earning.appointment?._id,
+            paymentId: earning.payment?._id,
+            notes: earning.notes
+          }))
+        },
+
+        // Payment Statistics
+        paymentStatistics: paymentStats.reduce((acc, stat) => {
+          acc[stat._id] = {
+            total: stat.total,
+            count: stat.count
+          };
+          return acc;
+        }, {}),
+
+        // Weekly Earnings Chart Data
+        weeklyEarningsChart: weeklyEarnings,
+
+        // Transaction Type Breakdown
+        transactionBreakdown: {
+          today: todaysData,
+          thisMonth: monthlyData,
+          lastMonth: lastMonthData
+        }
+      }
+    };
+
+    res.status(200).json(responseData);
+
   } catch (error) {
-    console.error("Error fetching transaction history:", error);
-    res.status(500).json({ message: "Error fetching transaction history" });
+    console.error("Error fetching financial data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch financial data",
+      error: error.message
+    });
   }
-}
+};
+
+const getTransactionHistory =
+  async (req, res) => {
+    try {
+      const { doctorId } = req.user;
+
+      if (!doctorId) {
+        return res.status(400).json({ message: "Doctor ID is required" });
+      }
+
+      // Get all successful credit transactions
+      const transactions = await Transaction.find({
+        user: new mongoose.Types.ObjectId(doctorId),
+        type: "doctor_credit",
+        status: "completed"
+      }).sort({ createdAt: -1 }); // Most recent first
+
+      res.status(200).json(transactions);
+    } catch (error) {
+      console.error("Error fetching transaction history:", error);
+      res.status(500).json({ message: "Error fetching transaction history" });
+    }
+  }
 
 module.exports = {
   getDoctorRevenue,
   getWalletSummary,
-  getFinancialSummary
+  getFinancialSummary,
+  getFinancialData
 };
