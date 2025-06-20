@@ -951,7 +951,7 @@ exports.getDoctorPatients = async (req, res) => {
     // Aggregation pipeline to get appointments with patient details
     const pipeline = [
       { $match: matchQuery },
-      
+
       // Lookup patient details
       {
         $lookup: {
@@ -961,10 +961,10 @@ exports.getDoctorPatients = async (req, res) => {
           as: 'patientDetails'
         }
       },
-      
+
       // Unwind patient details
       { $unwind: '$patientDetails' },
-      
+
       // Add search functionality if provided
       ...(search ? [{
         $match: {
@@ -976,7 +976,7 @@ exports.getDoctorPatients = async (req, res) => {
           ]
         }
       }] : []),
-      
+
       // Project only necessary appointment and patient fields
       {
         $project: {
@@ -1084,88 +1084,98 @@ exports.getDoctorPatients = async (req, res) => {
 // 3. Get Specific Patient Details for Doctor
 exports.getDoctorPatientById = async (req, res) => {
   try {
-    const { doctorId, id: patientId } = req.params;
+    const { id: patientId } = req.params;
 
-    // Validate IDs
-    if (!mongoose.Types.ObjectId.isValid(doctorId) || !mongoose.Types.ObjectId.isValid(patientId)) {
+    // Validate if patientId is provided
+    if (!patientId) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid doctor ID or patient ID'
+        message: "Patient ID is required"
       });
     }
 
-    // Find the patient with all details
-    const patient = await User.findOne({
-      _id: patientId,
-      role: 'patient'
-    })
-    .populate('doctorId', 'fullName email mobileNumber')
-    .populate('medicalRecords.doctorId', 'fullName')
+    // Find patient by ID and role, populate doctor and medical records
+    const [patient, appointments] = await Promise.all([
+      User.findOne({
+        _id: patientId,
+        role: "patient"
+      })
+        .populate({
+          path: 'doctorId',
+          select: 'fullName email specialization' // Adjust fields based on your Doctor model
+        })
+        .populate({
+          path: 'medicalRecords.doctorId',
+          select: 'fullName specialization'
+        })
+        .select('-password'), // Exclude password from response
+
+      // Fetch patient's appointments
+      Appointment.find({ patient: patientId })
+        .populate({
+          path: 'doctor',
+          select: 'fullName specialization email'
+        })
+        .populate({
+          path: 'payment',
+          select: 'amount status paymentMethod'
+        })
+        .sort({ date: -1, 'slot.startTime': -1 })
+        .limit(50) // Limit to recent 50 appointments
+    ]);
 
     if (!patient) {
       return res.status(404).json({
         success: false,
-        message: 'Patient not found or not assigned to this doctor'
+        message: "Patient not found"
       });
     }
 
-    // Prepare complete patient data
-    const patientData = {
-      // Basic Information
-      _id: patient._id,
-      fullName: patient.fullName,
-      email: patient.email,
-      countryCode: patient.countryCode,
-      mobileNumber: patient.mobileNumber,
-      
-      // Personal Details
-      gender: patient.gender,
-      dateOfBirth: patient.dateOfBirth,
-      age: patient.age, // Virtual field
-      bloodGroup: patient.bloodGroup,
-      
-      // Account Information
-      role: patient.role,
-      isEmailVerified: patient.isEmailVerified,
-      isMobileVerified: patient.isMobileVerified,
-      promoConsent: patient.promoConsent,
-      profilePhoto: patient.profilePhoto,
-      
-      // Address Information
-      address: {
-        addressLine1: patient.addressLine1,
-        addressLine2: patient.addressLine2,
-        city: patient.city,
-        state: patient.state,
-        pinCode: patient.pinCode,
-        country: patient.country
-      },
-      
-      medicalRecords: patient.medicalRecords.map(record => ({
-        _id: record._id,
-        type: record.type,
-        doctorId: record.doctorId,
-        date: record.date,
-        url: record.url,
-        description: record.description
-      })),
-      
-      // Timestamps
-      createdAt: patient.createdAt,
-      updatedAt: patient.updatedAt
-    };
-
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
-      message: 'Patient details retrieved successfully',
-      data: patientData
+      data: {
+        patient: {
+          id: patient._id,
+          fullName: patient.fullName,
+          email: patient.email,
+          countryCode: patient.countryCode,
+          mobileNumber: patient.mobileNumber,
+          gender: patient.gender,
+          dateOfBirth: patient.dateOfBirth,
+          age: patient.age, // Virtual field
+          bloodGroup: patient.bloodGroup,
+          profilePhoto: patient.profilePhoto,
+          address: {
+            addressLine1: patient.addressLine1,
+            addressLine2: patient.addressLine2,
+            city: patient.city,
+            state: patient.state,
+            pinCode: patient.pinCode,
+            country: patient.country
+          },
+          assignedDoctor: patient.doctorId,
+          medicalRecords: patient.medicalRecords,
+          appointments: appointments,
+          createdAt: patient.createdAt,
+          updatedAt: patient.updatedAt
+        }
+      }
     });
 
   } catch (error) {
     console.error('Error fetching patient details:', error);
-    return res.status(500).json({
+
+    // Handle specific MongoDB errors
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid patient ID format"
+      });
+    }
+
+    res.status(500).json({
       success: false,
-      message: 'Internal server error',
+      message: "Internal server error",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

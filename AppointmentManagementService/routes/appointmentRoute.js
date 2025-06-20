@@ -41,7 +41,7 @@ appointmentRouter.get('/doctors/:doctorId/patients/analytics', appointmentContro
 appointmentRouter.get('/doctors/:doctorId/patients', appointmentController.getDoctorPatients);
 
 //doctor get particular patient's details by his id 
-appointmentRouter.get('/doctors/:doctorId/patients/:id', appointmentController.getDoctorPatientById)
+appointmentRouter.get('/doctors/patients/:id', appointmentController.getDoctorPatientById)
 
 //post notes to patient by doctor to patient
 appointmentRouter.post('/patients/:id/notes', appointmentController.addPatientNotes)
