@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>OTP Verification - HeloDr</title>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body
+	style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafa; color: #333333; line-height: 1.6;">
+	<table cellpadding="0" cellspacing="0" width="100%"
+		style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-spacing: 0; border-collapse: collapse; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); border-radius: 12px; overflow: hidden;">
+		<!-- Header with white background and logo -->
+		<tr>
+			<td style="padding: 0;">
+				<table width="100%" cellpadding="0" cellspacing="0"
+					style="background-color: #ffffff; padding: 24px 0; text-align: center; border-spacing: 0; border-collapse: collapse; border-bottom: 1px solid #f0f0f0;">
+					<tr>
+						<td>
+							<table align="center" cellpadding="0" cellspacing="0"
+								style="border-spacing: 0; border-collapse: collapse;">
+								<tr>
+									<td style="padding: 0;">
+										<img src="https://res.cloudinary.com/dnl1wajhw/image/upload/v1744544139/logo_dghuww.png"
+											alt="HeloDr Logo" style="width: 70px; height: auto; display: block;">
+									</td>
+									<td style="padding: 0 0 0 15px;">
+										<span
+											style="font-size: 26px; font-weight: 700; color: #009490; display: inline-block; letter-spacing: -0.5px;">HeloDr</span>
+									</td>
+								</tr>
+							</table>
+						</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+
+		<!-- Colored bar separator -->
+		<tr>
+			<td style="padding: 0; height: 4px; background: linear-gradient(to right, #009490, #00b8b3);"></td>
+		</tr>
+
+		<!-- Content -->
+		<tr>
+			<td style="padding: 40px 30px;">
+				<table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+					<tr>
+						<td>
+							<h1
+								style="margin: 0 0 24px; font-size: 24px; font-weight: 700; color: #009490; text-align: center;">
+								<i class="fas fa-shield-alt" style="margin-right: 10px;"></i>Email Verification</h1>
+							
+							<!-- OTP Icon -->
+							<div style="text-align: center; margin-bottom: 30px;">
+								<div style="display: inline-block; width: 80px; height: 80px; background: linear-gradient(135deg, #009490, #00b8b3); border-radius: 50%; line-height: 80px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0, 148, 144, 0.3);">
+									<i class="fas fa-key" style="font-size: 32px; color: #ffffff;"></i>
+								</div>
+							</div>
+
+							<p style="margin: 0 0 25px; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+								Dear <strong>{{userName}}</strong>,
+							</p>
+							<p style="margin: 0 0 20px; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+								We have sent you a One-Time Password (OTP) to verify your email address. Please use the code below to complete your verification:
+							</p>
+
+							<!-- OTP Code Box -->
+							<table width="100%" cellpadding="0" cellspacing="0"
+								style="margin: 0 0 25px; border: 2px solid #009490; border-radius: 12px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 4px 15px rgba(0, 148, 144, 0.15);">
+								<tr>
+									<td style="padding: 30px; background: linear-gradient(135deg, #f5fafa, #e8f8f5); text-align: center;">
+										<p style="margin: 0 0 15px; font-size: 16px; font-weight: 600; color: #009490; text-transform: uppercase; letter-spacing: 1px;">
+											Your Verification Code
+										</p>
+										<div style="display: inline-block; background-color: #ffffff; padding: 20px 30px; border-radius: 10px; border: 1px solid #eaeaea; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);">
+											<span style="font-size: 36px; font-weight: 700; color: #009490; font-family: 'Courier New', monospace; letter-spacing: 8px;">{{otpCode}}</span>
+										</div>
+									</td>
+								</tr>
+							</table>
+
+							<!-- Timer and Validity Info -->
+							<table width="100%" cellpadding="0" cellspacing="0"
+								style="margin: 0 0 25px; border: 1px solid #ffeaa7; background-color: #fefcf0; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse;">
+								<tr>
+									<td style="padding: 20px; text-align: center;">
+										
+										<p style="margin: 0; font-size: 14px; color: #666666; line-height: 1.5;">
+											<i class="fas fa-exclamation-triangle" style="margin-right: 5px; color: #d63031;"></i>
+											This OTP is valid for <strong>15 minutes</strong> from the time it was sent.<br>
+											Generated at: <strong>{{generatedTime}}</strong><br>
+											Expires at: <strong>{{expiryTime}}</strong>
+										</p>
+									</td>
+								</tr>
+							</table>
+
+							<!-- Verification Instructions -->
+							<table width="100%" cellpadding="0" cellspacing="0"
+								style="margin: 0 0 25px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+								<tr>
+									<td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+										<p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+											<i class="fas fa-list-check" style="margin-right: 8px;"></i>How to Use This Code
+										</p>
+									</td>
+								</tr>
+								<tr>
+									<td style="padding: 20px;">
+										<ol style="margin: 0; padding-left: 20px; color: #555555; font-size: 15px; line-height: 1.6;">
+											<li style="margin-bottom: 10px;">Return to the HeloDr website or app where you initiated the verification process.</li>
+											<li style="margin-bottom: 10px;">Enter the 6-digit OTP code exactly as shown above.</li>
+											<li style="margin-bottom: 10px;">Click "Verify" to complete the process.</li>
+											<li style="margin-bottom: 0;">Your account will be verified and you can proceed with your appointment booking.</li>
+										</ol>
+									</td>
+								</tr>
+							</table>
+
+							<!-- Verify Now Button -->
+							<!-- <table width="100%" cellpadding="0" cellspacing="0"
+								style="border-spacing: 0; border-collapse: collapse; margin-bottom: 25px;">
+								<tr>
+									<td align="center">
+										<a href="{{verificationLink}}"
+											style="display: inline-block; min-width: 200px; background-color: #009490; color: #ffffff; font-size: 16px; font-weight: 600; text-align: center; text-decoration: none; padding: 14px 30px; border-radius: 8px; box-shadow: 0 3px 8px rgba(0, 148, 144, 0.2); transition: all 0.2s ease;">
+											<i class="fas fa-check-circle" style="margin-right: 8px;"></i>Verify Now
+										</a>
+									</td>
+								</tr>
+							</table> -->
+
+							<!-- Didn't receive code section -->
+							<!-- <table width="100%" cellpadding="0" cellspacing="0"
+								style="margin: 0 0 25px; border: 1px solid #e3f2fd; background-color: #f8fdff; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse;">
+								<tr>
+									<td style="padding: 20px; text-align: center;">
+										<p style="margin: 0 0 15px; font-size: 16px; font-weight: 600; color: #1976d2;">
+											<i class="fas fa-question-circle" style="margin-right: 8px;"></i>Didn't receive the code?
+										</p>
+										<p style="margin: 0 0 15px; font-size: 14px; color: #666666; line-height: 1.5;">
+											If you haven't received the OTP, please check your spam/junk folder.<br>
+											You can request a new code after the current one expires.
+										</p>
+										<a href="{{resendLink}}"
+											style="display: inline-block; background-color: #ffffff; color: #1976d2; border: 2px solid #1976d2; font-size: 14px; font-weight: 600; text-align: center; text-decoration: none; padding: 8px 20px; border-radius: 6px; transition: all 0.2s ease;">
+											<i class="fas fa-redo" style="margin-right: 6px;"></i>Resend OTP
+										</a>
+									</td>
+								</tr>
+							</table> -->
+
+							<!-- Security Note -->
+							<table width="100%" cellpadding="0" cellspacing="0"
+								style="margin: 0 0 25px; border: 1px solid #ffcdd2; background-color: #ffebee; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse;">
+								<tr>
+									<td style="padding: 20px;">
+										<p style="margin: 0 0 10px; font-size: 16px; font-weight: 600; color: #d32f2f;">
+											<i class="fas fa-shield-alt" style="margin-right: 8px;"></i>Security Notice
+										</p>
+										<ul style="margin: 0; padding-left: 20px; color: #666666; font-size: 14px; line-height: 1.5;">
+											<li style="margin-bottom: 5px;">Never share this OTP with anyone, including HeloDr staff.</li>
+											<li style="margin-bottom: 5px;">HeloDr will never ask for your OTP via phone or email.</li>
+											<li style="margin-bottom: 5px;">This code is only valid for the email address: <strong>{{userEmail}}</strong></li>
+											<li style="margin-bottom: 0;">If you didn't request this verification, please ignore this email.</li>
+										</ul>
+									</td>
+								</tr>
+							</table>
+
+							<p style="margin: 30px 0 0; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+								If you're having trouble with the verification process or need assistance, please contact our support team.
+							</p>
+							<p style="margin: 15px 0 0; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+								Thank you for choosing HeloDr!<br>
+								The HeloDr Team
+							</p>
+						</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+
+		<!-- Footer -->
+		<tr>
+			<td style="padding: 0;">
+				<table width="100%" cellpadding="0" cellspacing="0"
+					style="background-color: #f5f9f9; padding: 0; text-align: center; border-spacing: 0; border-collapse: collapse; border-top: 1px solid #eaeaea;">
+					<tr>
+						<td style="padding: 20px 0;">
+							<!-- Small logo in footer -->
+							<table align="center" cellpadding="0" cellspacing="0"
+								style="margin-bottom: 12px; border-spacing: 0; border-collapse: collapse;">
+								<tr>
+									<td style="padding: 0;">
+										<img src="https://res.cloudinary.com/dnl1wajhw/image/upload/v1744544139/logo_dghuww.png"
+											alt="HeloDr" style="width: 40px; height: auto; display: block;">
+									</td>
+								</tr>
+							</table>
+
+							<p style="margin: 0 0 15px; font-size: 14px; color: #666666;">
+								Need help? Contact our support team at
+								<a href="mailto:support@helodr.com"
+									style="color: #009490; text-decoration: none; font-weight: 500;">support@helodr.com</a>
+							</p>
+							<p style="margin: 0 0 10px; font-size: 12px; color: #888888;">
+								This is an automated message. Please do not reply to this email.
+							</p>
+							<p style="margin: 0; font-size: 12px; color: #888888;">
+								&copy; 2023 HeloDr. All rights reserved.
+							</p>
+						</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+	</table>
+
+	<!-- Spacer -->
+	<table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+		<tr>
+			<td style="padding: 30px 0;"></td>
+		</tr>
+	</table>
+</body>
+
+</html>
