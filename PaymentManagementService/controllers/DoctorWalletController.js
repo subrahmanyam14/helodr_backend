@@ -202,21 +202,19 @@ const getFinancialData = async (req, res) => {
 
     // 2. Get Today's Transactions
     const todaysTransactions = await Transaction.find({
-      user: new mongoose.Types.ObjectId(doctorId),
+      user: new mongoose.Types.ObjectId(req.user.id),
       createdAt: {
         $gte: startOfDay,
         $lt: endOfDay
       }
     })
-      .populate('referenceId')
       .sort({ createdAt: -1 })
       .limit(20);
 
     // 3. Get Recent Transactions (Last 10)
     const recentTransactions = await Transaction.find({
-      user: new mongoose.Types.ObjectId(doctorId)
+      user:new mongoose.Types.ObjectId(req.user.id)
     })
-      .populate('referenceId')
       .sort({ createdAt: -1 })
       .limit(10);
 
@@ -224,7 +222,7 @@ const getFinancialData = async (req, res) => {
     const todaysAnalytics = await Transaction.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(doctorId),
+          user: new mongoose.Types.ObjectId(req.user.id),
           createdAt: {
             $gte: startOfDay,
             $lt: endOfDay
@@ -244,7 +242,7 @@ const getFinancialData = async (req, res) => {
     const monthlyAnalytics = await Transaction.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(doctorId),
+          user: new mongoose.Types.ObjectId(req.user.id),
           createdAt: {
             $gte: startOfMonth,
             $lt: endOfMonth
@@ -264,7 +262,7 @@ const getFinancialData = async (req, res) => {
     const lastMonthAnalytics = await Transaction.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(doctorId),
+          user: new mongoose.Types.ObjectId(req.user.id),
           createdAt: {
             $gte: startOfLastMonth,
             $lt: endOfLastMonth
@@ -297,7 +295,7 @@ const getFinancialData = async (req, res) => {
     const paymentStats = await Payment.aggregate([
       {
         $match: {
-          doctor: new mongoose.Types.ObjectId(doctorId),
+          doctor: new mongoose.Types.ObjectId(req.user.id),
           createdAt: {
             $gte: startOfMonth,
             $lt: endOfMonth
