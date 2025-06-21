@@ -208,15 +208,13 @@ const getFinancialData = async (req, res) => {
         $lt: endOfDay
       }
     })
-      .populate('referenceId')
       .sort({ createdAt: -1 })
       .limit(20);
 
     // 3. Get Recent Transactions (Last 10)
     const recentTransactions = await Transaction.find({
-      user: new mongoose.Types.ObjectId(doctorId)
+      user:new mongoose.Types.ObjectId(doctorId)
     })
-      .populate('referenceId')
       .sort({ createdAt: -1 })
       .limit(10);
 
