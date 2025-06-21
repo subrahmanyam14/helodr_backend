@@ -11,6 +11,12 @@ router.post(
   reviewController.submitReview
 );
 
+// Get doctor review analytics
+router.get(
+  '/doctor/:doctorId/analytics',
+  reviewController.getDoctorReviewAnalytics
+);
+
 // Get doctor reviews
 router.get(
   '/doctor/:doctorId',
