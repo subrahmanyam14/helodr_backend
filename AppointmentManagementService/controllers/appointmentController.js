@@ -574,7 +574,7 @@ async function calculateAppointmentFee(doctorId, consultationType) {
 exports.getAppointments = async (req, res) => {
   try {
     let query = {};
-    const { status, upcoming, past, limit = 10, page = 1 } = req.query;
+    const { status, sortDirection, limit = 10, page = 1 } = req.query;
     const skip = (page - 1) * limit;
 
     // For patients
@@ -596,12 +596,6 @@ exports.getAppointments = async (req, res) => {
       query.status = status;
     }
 
-    if (upcoming === 'true') {
-      query.date = { $gte: new Date() };
-    } else if (past === 'true') {
-      query.date = { $lt: new Date() };
-    }
-
     const appointments = await Appointment.find(query)
       .populate('doctor', 'user')
       .populate({
@@ -612,7 +606,7 @@ exports.getAppointments = async (req, res) => {
         }
       })
       .populate('patient', 'fullName profilePhoto')
-      .sort({ date: 1 })
+      .sort({ date: sortDirection })
       .skip(skip)
       .limit(parseInt(limit));
 
