@@ -1,7 +1,7 @@
 const nodemailer = require("nodemailer");
 const express = require('express');
 require('dotenv').config();
-const {createEmailVerificationHTML, createReviewEmailHTML} = require("./mailContents.js");
+const {createEmailVerificationHTML, createReviewEmailHTML, createOtpHtml} = require("./mailContents.js");
 
 const mailRouter = express.Router();
 
@@ -46,14 +46,14 @@ mailRouter.post('/sendEmailVerification', async (req, res) => {
 });
 mailRouter.post('/sendFeedBackLink', async(req, res) => {
     try {
-        const { fullName, email, token, url } = req.body;
+        const { patientName, doctorName, doctorSpecialization, appointmentTime, appointmentDate, reviewLink } = req.body;
         // console.log(fullName, email, token, url);
-        if (!fullName || !email || !token || !url) {
+        if (!patientName || !doctorName || !doctorSpecialization || !appointmentTime || !appointmentDate || !reviewLink) {
             return res.status(400).json({ message: "Missing required fields" });
         }
 
-        const html = createEmailVerificationHTML(fullName, email, token, url);
-        await sendMail(email, 'Verify Your Email - HeloDr', html);
+        const html = createReviewEmailHTML(patientName, doctorName, doctorSpecialization, appointmentTime, appointmentDate, reviewLink);
+        await sendMail(email, 'Feedback form - HeloDr', html);
 
         res.status(200).json({ message: 'Verification email sent successfully' });
     } catch (error) {
@@ -63,6 +63,23 @@ mailRouter.post('/sendFeedBackLink', async(req, res) => {
 
 });
 
-mailRouter.post('/sendOTP')
+mailRouter.post('/sendOTP', async(req, res) => {
+    try {
+        const { fullName, email, otpCode, generatedTime, expiryTime } = req.body;
+        // console.log(fullName, email, token, url);
+        if (!fullName || !email || !otpCode || !generatedTime || !expiryTime) {
+            return res.status(400).json({ message: "Missing required fields" });
+        }
+
+        const html = createOtpHtml(fullName, email, otpCode, generatedTime, expiryTime);
+        await sendMail(email, 'Feedback form - HeloDr', html);
+
+        res.status(200).json({ message: 'Verification email sent successfully' });
+    } catch (error) {
+        console.error('Error sending email:', error);
+        res.status(500).json({ error: 'Failed to send email' });
+    }
+
+});
 
 module.exports = mailRouter;

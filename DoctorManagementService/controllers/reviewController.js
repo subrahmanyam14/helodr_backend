@@ -1,5 +1,6 @@
 const Appointment = require('../models/Appointment');
 const Notification = require('../models/Notification');
+const Review = require('../models/Review');
 const mongoose = require('mongoose');
 
 /**
@@ -77,6 +78,250 @@ const submitReview = async (req, res) => {
   }
 };
 
+const getDoctorReviewAnalytics = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { period = '30', startDate, endDate } = req.query;
+
+    if (!doctorId) {
+      return res.status(400).json({
+        success: false,
+        message: "Doctor ID is required"
+      });
+    }
+
+    // Build date filter
+    let dateFilter = {};
+    if (startDate && endDate) {
+      dateFilter = {
+        createdAt: {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate)
+        }
+      };
+    } else {
+      const days = parseInt(period);
+      const periodStart = new Date();
+      periodStart.setDate(periodStart.getDate() - days);
+      dateFilter = {
+        createdAt: { $gte: periodStart }
+      };
+    }
+
+    // Build match criteria
+    const matchCriteria = {
+      doctor: new mongoose.Types.ObjectId(doctorId),
+      status: "approved",
+      ...dateFilter
+    };
+
+    const analytics = await Review.aggregate([
+      { $match: matchCriteria },
+      {
+        $facet: {
+          // Overall statistics
+          overallStats: [
+            {
+              $group: {
+                _id: null,
+                totalReviews: { $sum: 1 },
+                averageRating: { $avg: "$rating" },
+                totalHelpfulVotes: { $sum: "$helpfulCount" },
+                totalUnhelpfulVotes: { $sum: "$unhelpfulCount" }
+              }
+            }
+          ],
+
+          // Rating distribution
+          ratingDistribution: [
+            {
+              $group: {
+                _id: "$rating",
+                count: { $sum: 1 }
+              }
+            },
+            { $sort: { _id: 1 } }
+          ],
+
+          // Aspect ratings analysis
+          aspectAnalysis: [
+            {
+              $group: {
+                _id: null,
+                avgWaitingTime: { $avg: "$aspects.waitingTime" },
+                avgStaffCourteousness: { $avg: "$aspects.staffCourteousness" },
+                avgDoctorKnowledge: { $avg: "$aspects.doctorKnowledge" },
+                avgDoctorFriendliness: { $avg: "$aspects.doctorFriendliness" },
+                avgTreatmentExplanation: { $avg: "$aspects.treatmentExplanation" },
+                waitingTimeCount: { 
+                  $sum: { $cond: [{ $ne: ["$aspects.waitingTime", null] }, 1, 0] }
+                },
+                staffCourtCount: { 
+                  $sum: { $cond: [{ $ne: ["$aspects.staffCourteousness", null] }, 1, 0] }
+                },
+                doctorKnowCount: { 
+                  $sum: { $cond: [{ $ne: ["$aspects.doctorKnowledge", null] }, 1, 0] }
+                },
+                doctorFriendCount: { 
+                  $sum: { $cond: [{ $ne: ["$aspects.doctorFriendliness", null] }, 1, 0] }
+                },
+                treatmentExpCount: { 
+                  $sum: { $cond: [{ $ne: ["$aspects.treatmentExplanation", null] }, 1, 0] }
+                }
+              }
+            }
+          ],
+
+          // Monthly trends (last 12 months)
+          monthlyTrends: [
+            {
+              $group: {
+                _id: {
+                  year: { $year: "$createdAt" },
+                  month: { $month: "$createdAt" }
+                },
+                reviewCount: { $sum: 1 },
+                averageRating: { $avg: "$rating" },
+                helpfulVotes: { $sum: "$helpfulCount" }
+              }
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } },
+            { $limit: 12 }
+          ],
+
+          // Recent reviews sample
+          recentReviews: [
+            { $sort: { createdAt: -1 } },
+            { $limit: 10 },
+            {
+              $lookup: {
+                from: "users",
+                localField: "patient",
+                foreignField: "_id",
+                as: "patientInfo"
+              }
+            },
+            {
+              $project: {
+                rating: 1,
+                feedback: 1,
+                aspects: 1,
+                isAnonymous: 1,
+                helpfulCount: 1,
+                unhelpfulCount: 1,
+                createdAt: 1,
+                patientName: {
+                  $cond: [
+                    { $eq: ["$isAnonymous", true] },
+                    "Anonymous",
+                    { $arrayElemAt: ["$patientInfo.name", 0] }
+                  ]
+                }
+              }
+            }
+          ],
+
+          // Review trends by day (for line chart)
+          dailyTrends: [
+            {
+              $group: {
+                _id: {
+                  date: {
+                    $dateToString: {
+                      format: "%Y-%m-%d",
+                      date: "$createdAt"
+                    }
+                  }
+                },
+                count: { $sum: 1 },
+                avgRating: { $avg: "$rating" }
+              }
+            },
+            { $sort: { "_id.date": 1 } },
+            { $limit: 30 }
+          ]
+        }
+      }
+    ]);
+
+    const result = analytics[0];
+
+    // Format the response
+    const response = {
+      success: true,
+      data: {
+        overview: {
+          totalReviews: result.overallStats[0]?.totalReviews || 0,
+          averageRating: parseFloat((result.overallStats[0]?.averageRating || 0).toFixed(2)),
+          totalHelpfulVotes: result.overallStats[0]?.totalHelpfulVotes || 0,
+          totalUnhelpfulVotes: result.overallStats[0]?.totalUnhelpfulVotes || 0,
+          helpfulnessRatio: result.overallStats[0]?.totalHelpfulVotes > 0 ? 
+            parseFloat((result.overallStats[0].totalHelpfulVotes / 
+            (result.overallStats[0].totalHelpfulVotes + result.overallStats[0].totalUnhelpfulVotes) * 100).toFixed(2)) : 0
+        },
+        
+        ratingDistribution: result.ratingDistribution.reduce((acc, item) => {
+          acc[`${item._id}star`] = item.count;
+          return acc;
+        }, { '1star': 0, '2star': 0, '3star': 0, '4star': 0, '5star': 0 }),
+        
+        aspectRatings: result.aspectAnalysis[0] ? {
+          waitingTime: {
+            average: parseFloat((result.aspectAnalysis[0].avgWaitingTime || 0).toFixed(2)),
+            count: result.aspectAnalysis[0].waitingTimeCount || 0
+          },
+          staffCourteousness: {
+            average: parseFloat((result.aspectAnalysis[0].avgStaffCourteousness || 0).toFixed(2)),
+            count: result.aspectAnalysis[0].staffCourtCount || 0
+          },
+          doctorKnowledge: {
+            average: parseFloat((result.aspectAnalysis[0].avgDoctorKnowledge || 0).toFixed(2)),
+            count: result.aspectAnalysis[0].doctorKnowCount || 0
+          },
+          doctorFriendliness: {
+            average: parseFloat((result.aspectAnalysis[0].avgDoctorFriendliness || 0).toFixed(2)),
+            count: result.aspectAnalysis[0].doctorFriendCount || 0
+          },
+          treatmentExplanation: {
+            average: parseFloat((result.aspectAnalysis[0].avgTreatmentExplanation || 0).toFixed(2)),
+            count: result.aspectAnalysis[0].treatmentExpCount || 0
+          }
+        } : {},
+        
+        monthlyTrends: result.monthlyTrends.map(trend => ({
+          month: `${trend._id.year}-${String(trend._id.month).padStart(2, '0')}`,
+          reviewCount: trend.reviewCount,
+          averageRating: parseFloat(trend.averageRating.toFixed(2)),
+          helpfulVotes: trend.helpfulVotes
+        })),
+        
+        dailyTrends: result.dailyTrends.map(trend => ({
+          date: trend._id.date,
+          reviewCount: trend.count,
+          averageRating: parseFloat(trend.avgRating.toFixed(2))
+        })),
+        
+        recentReviews: result.recentReviews,
+      },
+      filters: {
+        doctorId,
+        period: period + ' days',
+        dateRange: startDate && endDate ? { startDate, endDate } : null
+      }
+    };
+
+    res.status(200).json(response);
+
+  } catch (error) {
+    console.error('Error fetching doctor review analytics:', error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch review analytics",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 /**
  * @desc    Get reviews for a doctor
  * @route   GET /api/reviews/doctor/:doctorId
@@ -111,7 +356,7 @@ const getDoctorReviews = async (req, res) => {
     const stats = await Appointment.aggregate([
       { 
         $match: { 
-          doctor: mongoose.Types.ObjectId(doctorId), 
+          doctor: new mongoose.Types.ObjectId(doctorId), 
           status: 'completed',
           'review.rating': { $exists: true }
         } 
@@ -366,6 +611,7 @@ const deleteReview = async (req, res) => {
 
 module.exports = {
   submitReview,
+  getDoctorReviewAnalytics,
   getDoctorReviews,
   getPatientReviews,
   updateReview,
