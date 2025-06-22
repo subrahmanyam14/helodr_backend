@@ -1312,3 +1312,351 @@ function isSameDay(date1, date2) {
   const d2 = new Date(date2).toISOString().split('T')[0];
   return d1 === d2;
 }
+
+// Updated GET Available Slots - Fix slot allocation fetching
+exports.getDoctorAvailability = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid doctor ID format'
+      });
+    }
+
+    const availability = await Availability.findOne({
+      doctor: doctorId,
+      isActive: true,
+      $or: [
+        { effectiveTo: { $exists: false } },
+        { effectiveTo: { $gte: new Date() } }
+      ]
+    }).populate('doctor', 'name email');
+
+    if (!availability) {
+      return res.status(404).json({
+        success: false,
+        message: 'No availability found for this doctor',
+        data: null
+      });
+    }
+
+    // Helper function to generate time slots (same as frontend)
+    const generateTimeSlots = (startTime, endTime, slotDuration, bufferTime) => {
+      const slots = [];
+      const currentYear = new Date().getFullYear() + 1;
+      const start = new Date(`${currentYear}-01-01T${startTime}:00`);
+      const end = new Date(`${currentYear}-01-01T${endTime}:00`);
+      const slotDurationMs = slotDuration * 60 * 1000;
+      const bufferTimeMs = bufferTime * 60 * 1000;
+
+      let current = new Date(start);
+
+      while (current < end) {
+        const slotEnd = new Date(current.getTime() + slotDurationMs);
+        if (slotEnd <= end) {
+          slots.push({
+            startTime: current.toTimeString().slice(0, 5),
+            endTime: slotEnd.toTimeString().slice(0, 5)
+          });
+        }
+        current = new Date(current.getTime() + slotDurationMs + bufferTimeMs);
+      }
+
+      return slots;
+    };
+
+    // Transform data to match frontend format with proper slot allocation
+    const transformedSchedule = availability.schedule.map(daySchedule => {
+      const shift = daySchedule.shifts[0]; // Get first shift
+
+      // Generate all possible slots for this day
+      const allSlots = generateTimeSlots(
+        shift.startTime,
+        shift.endTime,
+        availability.slotDuration,
+        availability.bufferTime
+      );
+
+      // Create allocated slots based on consultation types
+      const allocatedSlots = [];
+
+      // For each consultation type, allocate ALL available slots
+      shift.consultationTypes.forEach(ct => {
+        allSlots.forEach((slot, index) => {
+          allocatedSlots.push({
+            id: `${daySchedule._id}-${ct.type}-${index}`,
+            allocationType: ct.type === 'clinic' ? 'in-clinic' : 'video',
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            originalIndex: index,
+            fee: ct.fee,
+            maxPatients: ct.maxPatients
+          });
+        });
+      });
+
+      return {
+        id: daySchedule._id,
+        day: daySchedule.day,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        inClinicFee: shift.consultationTypes.find(ct => ct.type === 'clinic')?.fee || 500,
+        videoFee: shift.consultationTypes.find(ct => ct.type === 'video')?.fee || 400,
+        maxPatientsPerSlot: shift.consultationTypes[0]?.maxPatients || 1,
+        allocatedSlots: allocatedSlots,
+        totalSlots: allSlots.length,
+        availableSlots: [] // All slots are allocated in this design
+      };
+    });
+
+    const responseData = {
+      id: availability._id,
+      doctor: availability.doctor,
+      isVirtual: availability.isVirtual,
+      slotDuration: availability.slotDuration,
+      bufferTime: availability.bufferTime,
+      recurrence: availability.recurrence,
+      schedule: transformedSchedule,
+      overrides: availability.overrides,
+      bookedSlots: availability.bookedSlots,
+      effectiveFrom: availability.effectiveFrom,
+      effectiveTo: availability.effectiveTo,
+      isActive: availability.isActive
+    };
+
+    res.status(200).json({
+      success: true,
+      message: 'Availability retrieved successfully',
+      data: responseData
+    });
+
+  } catch (error) {
+    console.error('Error fetching availability:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch availability',
+      error: error.message
+    });
+  }
+};
+
+// Updated CREATE - Better slot handling
+exports.createDoctorAvailability = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const {
+      slotDuration,
+      bufferTime,
+      effectiveFrom,
+      isVirtual = false,
+      recurrence = 'weekly',
+      weeklySlots
+    } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid doctor ID format'
+      });
+    }
+
+    if (!slotDuration || !weeklySlots || weeklySlots.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Slot duration and weekly schedule are required'
+      });
+    }
+
+    // Deactivate existing availability
+    const existingAvailability = await Availability.findOne({
+      doctor: doctorId,
+      isActive: true,
+      $or: [
+        { effectiveTo: { $exists: false } },
+        { effectiveTo: { $gte: new Date() } }
+      ]
+    });
+
+    if (existingAvailability) {
+      existingAvailability.effectiveTo = new Date();
+      existingAvailability.isActive = false;
+      await existingAvailability.save();
+    }
+
+    // Transform frontend data to backend schema
+    const schedule = weeklySlots.map(dayData => {
+      const consultationTypes = [];
+
+      // Group allocated slots by type
+      const inClinicSlots = dayData.allocatedSlots?.filter(slot => slot.allocationType === 'in-clinic') || [];
+      const videoSlots = dayData.allocatedSlots?.filter(slot => slot.allocationType === 'video') || [];
+
+      // Add consultation types only if slots are allocated
+      if (inClinicSlots.length > 0) {
+        consultationTypes.push({
+          type: 'clinic',
+          fee: dayData.inClinicFee || 500,
+          maxPatients: dayData.maxPatientsPerSlot || 1
+        });
+      }
+
+      if (videoSlots.length > 0) {
+        consultationTypes.push({
+          type: 'video',
+          fee: dayData.videoFee || 400,
+          maxPatients: dayData.maxPatientsPerSlot || 1
+        });
+      }
+
+      return {
+        day: dayData.day,
+        shifts: [{
+          startTime: dayData.startTime,
+          endTime: dayData.endTime,
+          isActive: true,
+          consultationTypes: consultationTypes
+        }]
+      };
+    }).filter(daySchedule => daySchedule.shifts[0].consultationTypes.length > 0); // Only include days with allocated slots
+
+    if (schedule.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one day must have allocated slots'
+      });
+    }
+
+    const newAvailability = new Availability({
+      doctor: doctorId,
+      isVirtual,
+      slotDuration: parseInt(slotDuration),
+      bufferTime: parseInt(bufferTime) || 0,
+      recurrence,
+      schedule,
+      effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(),
+      isActive: true
+    });
+
+    const savedAvailability = await newAvailability.save();
+    await savedAvailability.populate('doctor', 'name email');
+
+    res.status(201).json({
+      success: true,
+      message: 'Availability created successfully',
+      data: savedAvailability
+    });
+
+  } catch (error) {
+    console.error('Error creating availability:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create availability',
+      error: error.message
+    });
+  }
+};
+
+
+// 3. UPDATE Available Slots - Update existing availability
+exports.updateDoctorAvailability = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const {
+      slotDuration,
+      bufferTime,
+      effectiveFrom,
+      isVirtual,
+      recurrence,
+      weeklySlots,
+      overrides = []
+    } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid doctor ID format'
+      });
+    }
+
+    // Find current active availability
+    const availability = await Availability.findOne({
+      doctor: doctorId,
+      isActive: true,
+      $or: [
+        { effectiveTo: { $exists: false } },
+        { effectiveTo: { $gte: new Date() } }
+      ]
+    });
+
+    if (!availability) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active availability found for this doctor'
+      });
+    }
+
+    // Transform frontend data to match backend schema
+    const updatedSchedule = weeklySlots.map(dayData => {
+      const consultationTypes = [];
+
+      // Check for in-clinic slots
+      const inClinicSlots = dayData.allocatedSlots?.filter(slot => slot.allocationType === 'in-clinic') || [];
+      if (inClinicSlots.length > 0) {
+        consultationTypes.push({
+          type: 'clinic',
+          fee: dayData.inClinicFee || 500,
+          maxPatients: dayData.maxPatientsPerSlot || 1
+        });
+      }
+
+      // Check for video slots
+      const videoSlots = dayData.allocatedSlots?.filter(slot => slot.allocationType === 'video') || [];
+      if (videoSlots.length > 0) {
+        consultationTypes.push({
+          type: 'video',
+          fee: dayData.videoFee || 400,
+          maxPatients: dayData.maxPatientsPerSlot || 1
+        });
+      }
+
+      return {
+        day: dayData.day,
+        shifts: [{
+          startTime: dayData.startTime,
+          endTime: dayData.endTime,
+          isActive: true,
+          consultationTypes: consultationTypes
+        }]
+      };
+    });
+
+    // Update availability
+    availability.slotDuration = parseInt(slotDuration) || availability.slotDuration;
+    availability.bufferTime = parseInt(bufferTime) || availability.bufferTime;
+    availability.schedule = updatedSchedule;
+    availability.overrides = overrides;
+
+    if (isVirtual !== undefined) availability.isVirtual = isVirtual;
+    if (recurrence) availability.recurrence = recurrence;
+    if (effectiveFrom) availability.effectiveFrom = new Date(effectiveFrom);
+
+    const updatedAvailability = await availability.save();
+    await updatedAvailability.populate('doctor', 'name email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Availability updated successfully',
+      data: updatedAvailability
+    });
+
+  } catch (error) {
+    console.error('Error updating availability:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update availability',
+      error: error.message
+    });
+  }
+};

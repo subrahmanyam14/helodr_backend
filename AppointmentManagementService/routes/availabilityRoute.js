@@ -107,4 +107,25 @@ availabilityRouter.post(
   availabilityController.bookSlot
 );
 
+availabilityRouter.get(
+  '/slots/:doctorId',
+    protect,
+    authorize('doctor'),
+    availabilityController.getDoctorAvailability
+)
+
+availabilityRouter.post(
+  '/slots/:doctorId',
+    protect,
+    authorize('doctor'),
+    availabilityController.createDoctorAvailability
+)
+
+availabilityRouter.put(
+  '/slots/:doctorId',
+    protect,
+    authorize('doctor'),
+    availabilityController.updateDoctorAvailability
+)
+
 module.exports = availabilityRouter;
