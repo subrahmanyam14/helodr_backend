@@ -1,5 +1,4 @@
 
-
 const createReviewEmailHTML = (patientName, doctorName, doctorSpecialization, appointmentTime, appointmentDate, reviewLink) => {
     return `
     <!DOCTYPE html>
@@ -216,7 +215,6 @@ const createReviewEmailHTML = (patientName, doctorName, doctorSpecialization, ap
 
 </html>`
 }
-
 
 const createEmailVerificationHTML = (fullName, email, token, url) => {
     const verificationUrl = `${url}/verify-email?email=${email}&token=${token}`;
