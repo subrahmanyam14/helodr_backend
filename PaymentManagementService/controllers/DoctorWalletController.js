@@ -452,7 +452,8 @@ const getFinancialData = async (req, res) => {
             status: earning.status,
             appointmentId: earning.appointment?._id,
             paymentId: earning.payment?._id,
-            notes: earning.notes
+            notes: earning.notes,
+            createdAt: earning.createdAt
           }))
         },
 
