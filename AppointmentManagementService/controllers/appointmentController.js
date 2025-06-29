@@ -606,7 +606,7 @@ exports.getAppointments = async (req, res) => {
         }
       })
       .populate('patient', 'fullName profilePhoto')
-      .sort({ date: sortDirection })
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
@@ -623,6 +623,7 @@ exports.getAppointments = async (req, res) => {
       }
     });
   } catch (err) {
+    console.log("Error in the getAppoinments, ", err);
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 };

@@ -1597,47 +1597,284 @@ exports.updateDoctorAvailability = async (req, res) => {
       });
     }
 
-    // Transform frontend data to match backend schema
-    const updatedSchedule = weeklySlots.map(dayData => {
-      const consultationTypes = [];
-
-      // Check for in-clinic slots
-      const inClinicSlots = dayData.allocatedSlots?.filter(slot => slot.allocationType === 'in-clinic') || [];
-      if (inClinicSlots.length > 0) {
-        consultationTypes.push({
-          type: 'clinic',
-          fee: dayData.inClinicFee || 500,
-          maxPatients: dayData.maxPatientsPerSlot || 1
-        });
-      }
-
-      // Check for video slots
-      const videoSlots = dayData.allocatedSlots?.filter(slot => slot.allocationType === 'video') || [];
-      if (videoSlots.length > 0) {
-        consultationTypes.push({
-          type: 'video',
-          fee: dayData.videoFee || 400,
-          maxPatients: dayData.maxPatientsPerSlot || 1
-        });
-      }
-
-      return {
-        day: dayData.day,
-        shifts: [{
-          startTime: dayData.startTime,
-          endTime: dayData.endTime,
-          isActive: true,
-          consultationTypes: consultationTypes
-        }]
+    // Helper function to check time overlap
+    const checkTimeOverlap = (start1, end1, start2, end2) => {
+      const parseTime = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        return hours * 60 + minutes; // Convert to minutes
       };
-    });
+      
+      const s1 = parseTime(start1);
+      const e1 = parseTime(end1);
+      const s2 = parseTime(start2);
+      const e2 = parseTime(end2);
+      
+      return (s1 < e2 && s2 < e1);
+    };
+
+    // Helper function to create shifts from allocated slots - SEPARATE SHIFTS FOR EACH TYPE
+    const createShiftsFromSlots = (dayData) => {
+      const shifts = [];
+
+      // Helper function to parse time string to minutes
+      const parseTimeToMinutes = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        return hours * 60 + minutes;
+      };
+
+      // Helper function to merge contiguous time slots of the same type
+      const mergeContiguousSlots = (slots, consultationType) => {
+        if (slots.length === 0) return [];
+
+        // Sort slots by start time
+        const sortedSlots = slots.sort((a, b) => 
+          parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime)
+        );
+
+        const mergedRanges = [];
+        let currentRange = {
+          startTime: sortedSlots[0].startTime,
+          endTime: sortedSlots[0].endTime,
+          fee: sortedSlots[0].fee,
+          maxPatients: sortedSlots[0].maxPatients
+        };
+
+        for (let i = 1; i < sortedSlots.length; i++) {
+          const currentSlot = sortedSlots[i];
+          const currentEndMinutes = parseTimeToMinutes(currentRange.endTime);
+          const nextStartMinutes = parseTimeToMinutes(currentSlot.startTime);
+
+          // Check if current slot is contiguous with the current range
+          if (nextStartMinutes <= currentEndMinutes) {
+            // Extend the current range
+            const nextEndMinutes = parseTimeToMinutes(currentSlot.endTime);
+            const currentRangeEndMinutes = parseTimeToMinutes(currentRange.endTime);
+            
+            if (nextEndMinutes > currentRangeEndMinutes) {
+              currentRange.endTime = currentSlot.endTime;
+            }
+            
+            // Use the minimum fee and maximum maxPatients for merged ranges
+            currentRange.fee = Math.min(currentRange.fee, currentSlot.fee);
+            currentRange.maxPatients = Math.max(currentRange.maxPatients, currentSlot.maxPatients);
+          } else {
+            // No overlap, save current range and start new one
+            mergedRanges.push({ ...currentRange });
+            currentRange = {
+              startTime: currentSlot.startTime,
+              endTime: currentSlot.endTime,
+              fee: currentSlot.fee,
+              maxPatients: currentSlot.maxPatients
+            };
+          }
+        }
+
+        // Add the last range
+        mergedRanges.push(currentRange);
+
+        return mergedRanges.map(range => ({
+          startTime: range.startTime,
+          endTime: range.endTime,
+          isActive: true,
+          consultationTypes: [{
+            type: consultationType,
+            fee: range.fee,
+            maxPatients: range.maxPatients
+          }]
+        }));
+      };
+
+      // Group slots by consultation type
+      const slotsByType = {
+        clinic: [],
+        video: []
+      };
+
+      // Process allocated slots
+      if (dayData.allocatedSlots && dayData.allocatedSlots.length > 0) {
+        dayData.allocatedSlots.forEach(slot => {
+          const consultationType = slot.allocationType === 'in-clinic' ? 'clinic' : 'video';
+          
+          // Get fee and maxPatients - prioritize slot-level, fallback to day-level
+          let fee, maxPatients;
+          
+          if (consultationType === 'clinic') {
+            fee = slot.fee !== undefined ? slot.fee : dayData.inClinicFee;
+            maxPatients = slot.maxPatients !== undefined ? slot.maxPatients : dayData.maxPatientsPerSlot;
+          } else {
+            fee = slot.fee !== undefined ? slot.fee : dayData.videoFee;
+            maxPatients = slot.maxPatients !== undefined ? slot.maxPatients : dayData.maxPatientsPerSlot;
+          }
+          
+          slotsByType[consultationType].push({
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            fee: fee,
+            maxPatients: maxPatients
+          });
+        });
+      } else {
+        // If no allocated slots, create from day-level data
+        if (dayData.inClinicFee && dayData.startTime && dayData.endTime) {
+          slotsByType.clinic.push({
+            startTime: dayData.startTime,
+            endTime: dayData.endTime,
+            fee: dayData.inClinicFee,
+            maxPatients: dayData.maxPatientsPerSlot || 1
+          });
+        }
+        
+        if (dayData.videoFee && dayData.startTime && dayData.endTime) {
+          slotsByType.video.push({
+            startTime: dayData.startTime,
+            endTime: dayData.endTime,
+            fee: dayData.videoFee,
+            maxPatients: dayData.maxPatientsPerSlot || 1
+          });
+        }
+      }
+
+      // Create separate shifts for each consultation type
+      ['clinic', 'video'].forEach(consultationType => {
+        const slotsForType = slotsByType[consultationType];
+        if (slotsForType.length > 0) {
+          const mergedShifts = mergeContiguousSlots(slotsForType, consultationType);
+          shifts.push(...mergedShifts);
+        }
+      });
+
+      // Sort all shifts by start time
+      return shifts.sort((a, b) => 
+        parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime)
+      );
+    };
+
+    // Transform frontend data to match backend schema
+    const updatedSchedule = [];
+    const validationErrors = [];
+
+    for (const dayData of weeklySlots) {
+      try {
+        const shifts = createShiftsFromSlots(dayData);
+        
+        if (shifts.length === 0) {
+          validationErrors.push(`No valid shifts found for ${dayData.day}`);
+          continue;
+        }
+
+        // Validate each shift
+        for (const shift of shifts) {
+          if (!shift.startTime || !shift.endTime) {
+            validationErrors.push(`Invalid time range for ${dayData.day}`);
+            continue;
+          }
+
+          // Validate time format
+          const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+          if (!timeRegex.test(shift.startTime) || !timeRegex.test(shift.endTime)) {
+            validationErrors.push(`Invalid time format for ${dayData.day}`);
+            continue;
+          }
+
+          // Validate start time is before end time
+          const parseTime = (timeStr) => {
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            return hours * 60 + minutes;
+          };
+
+          if (parseTime(shift.startTime) >= parseTime(shift.endTime)) {
+            validationErrors.push(`Start time must be before end time for ${dayData.day}`);
+            continue;
+          }
+
+          // Validate consultation types
+          if (!shift.consultationTypes || shift.consultationTypes.length === 0) {
+            validationErrors.push(`No consultation types specified for ${dayData.day}`);
+            continue;
+          }
+
+          for (const consType of shift.consultationTypes) {
+            if (!['clinic', 'video'].includes(consType.type)) {
+              validationErrors.push(`Invalid consultation type for ${dayData.day}: ${consType.type}`);
+            }
+            if (typeof consType.fee !== 'number' || consType.fee < 0) {
+              validationErrors.push(`Invalid fee for ${dayData.day}: ${consType.fee}`);
+            }
+            if (typeof consType.maxPatients !== 'number' || consType.maxPatients < 1) {
+              validationErrors.push(`Invalid maxPatients for ${dayData.day}: ${consType.maxPatients}`);
+            }
+          }
+        }
+
+        updatedSchedule.push({
+          day: dayData.day,
+          shifts: shifts
+        });
+
+      } catch (error) {
+        validationErrors.push(`Error processing ${dayData.day}: ${error.message}`);
+      }
+    }
+
+    // Return validation errors if any
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation errors found',
+        errors: validationErrors
+      });
+    }
+
+    // Validate overrides
+    const validatedOverrides = [];
+    for (const override of overrides) {
+      if (!override.date) {
+        validationErrors.push('Override date is required');
+        continue;
+      }
+
+      const overrideDate = new Date(override.date);
+      if (isNaN(overrideDate.getTime())) {
+        validationErrors.push(`Invalid override date: ${override.date}`);
+        continue;
+      }
+
+      // Validate override shifts if provided
+      if (override.shifts && override.shifts.length > 0) {
+        for (const shift of override.shifts) {
+          if (shift.startTime && shift.endTime) {
+            const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+            if (!timeRegex.test(shift.startTime) || !timeRegex.test(shift.endTime)) {
+              validationErrors.push(`Invalid time format in override for ${override.date}`);
+              continue;
+            }
+          }
+        }
+      }
+
+      validatedOverrides.push({
+        date: overrideDate,
+        isAvailable: override.isAvailable !== undefined ? override.isAvailable : false,
+        shifts: override.shifts || [],
+        reason: override.reason || ''
+      });
+    }
+
+    // Return validation errors if any
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation errors found',
+        errors: validationErrors
+      });
+    }
 
     // Update availability
     availability.slotDuration = parseInt(slotDuration) || availability.slotDuration;
     availability.bufferTime = parseInt(bufferTime) || availability.bufferTime;
     availability.schedule = updatedSchedule;
-    availability.overrides = overrides;
-
+    availability.overrides = validatedOverrides;
+    
     if (isVirtual !== undefined) availability.isVirtual = isVirtual;
     if (recurrence) availability.recurrence = recurrence;
     if (effectiveFrom) availability.effectiveFrom = new Date(effectiveFrom);
@@ -1648,7 +1885,12 @@ exports.updateDoctorAvailability = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Availability updated successfully',
-      data: updatedAvailability
+      data: updatedAvailability,
+      summary: {
+        totalDays: updatedSchedule.length,
+        totalShifts: updatedSchedule.reduce((sum, day) => sum + day.shifts.length, 0),
+        totalOverrides: validatedOverrides.length
+      }
     });
 
   } catch (error) {
@@ -1660,3 +1902,7 @@ exports.updateDoctorAvailability = async (req, res) => {
     });
   }
 };
+
+
+
+
