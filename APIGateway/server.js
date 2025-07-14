@@ -13,6 +13,7 @@ const serviceCUrl = process.env.APPOINTMENT_MANAGEMENT_SERVICE_URL || 'http://lo
 const serviceDUrl = process.env.TRANSPORT_MANAGEMENT_SERVICE_URL || 'http://localhost:5004';
 const serviceEUrl = process.env.PAYMENT_MANAGEMENT_SERVICE_URL || 'http://localhost:5005';
 const serviceFUrl = process.env.NOTIFICATION_MANAGEMENT_SERVICE_URL || 'http://localhost:5006';
+const serviceGUrl = process.env.ADMIN_MANAGEMENT_SERVICE_URL || 'http://localhost:5007';
 
 // Middlewares
 app.use(cors(["http://localhost:3000", "https://helodr-saisobila.vercel.app"])); // Allow cross-origin requests
@@ -73,6 +74,11 @@ app.use('/api/payment', (req, res) => {
 app.use('/api/notification', (req, res) => {
   console.log(`Routing /api/notification → ${serviceFUrl}`);
   proxy.web(req, res, { target: serviceFUrl });
+});
+
+app.use('/api/admin', (req, res) => {
+  console.log(`Routing /api/admin → ${serviceGUrl}`);
+  proxy.web(req, res, { target: serviceGUrl });
 });
 
 // app.use('/api/info', (req, res) => {
