@@ -17,7 +17,7 @@ userRouter.post('/resend-verification-email',userController.sendEmailVerificatio
 userRouter.use(protect); // All routes below this will use the protect middleware
 userRouter.get('/me', userController.getMe);
 userRouter.put('/me', configureFileUpload('profilePicture'), userController.updateProfile);
-// userRouter.post('/sendEmailVerification', userController.updateEmail);
+userRouter.post('/update-email', userController.updateEmail);
 
 userRouter.post('/reset-password', userController.resetPassword);
 userRouter.get('/get-health-records', healthAndLoginStatusController.getHealthRecords);

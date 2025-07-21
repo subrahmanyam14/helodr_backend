@@ -72,9 +72,9 @@ mailRouter.post('/sendOTP', async(req, res) => {
         }
 
         const html = createOtpHtml(fullName, email, otpCode, generatedTime, expiryTime);
-        await sendMail(email, 'Feedback form - HeloDr', html);
+        await sendMail(email, 'One Time Password - HeloDr', html);
 
-        res.status(200).json({ message: 'Verification email sent successfully' });
+        res.status(200).json({ success: true, message: 'Verification email sent successfully' });
     } catch (error) {
         console.error('Error sending email:', error);
         res.status(500).json({ error: 'Failed to send email' });

@@ -36,7 +36,7 @@ exports.login = async (req, res) => {
     // Find user by email or mobile
     const user = await User.findOne({
       $or: [{ mobileNumber: emailOrMobile }, { email: emailOrMobile }]
-    }).select('password role mobileNumber fullName countryCode isMobileVerified isEmailVerified _id doctorId');
+    }).select('password role mobileNumber fullName countryCode email isMobileVerified isEmailVerified _id doctorId');
     // console.log(user);
 
     if (!user) {
@@ -150,10 +150,15 @@ exports.login = async (req, res) => {
       try {
         
 
-        const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
-          to: `${user.countryCode}${user.mobileNumber}`,
-          otp
-        });
+        // const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
+        //   to: `${user.countryCode}${user.mobileNumber}`,
+        //   otp
+        // });
+
+        const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
+        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+
+      });
 
         if (!response.data.success) {
           return res.status(500).json({
@@ -196,10 +201,66 @@ exports.login = async (req, res) => {
 
     // Email verification case
     if (user.isEmailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'Currently we are not supporting email login with OTP'
+      const otp = generateOTP();
+      const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes expiry
+
+      await Otp.findOneAndUpdate(
+        { user_id: user._id },
+        {
+          otp_code: otp,
+          expires_at: otpExpiry
+        },
+        {
+          upsert: true, // create if not exists
+          new: true,    // return the updated document
+          setDefaultsOnInsert: true // apply defaults if creating
+        }
+      );
+      
+
+      try {
+        const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
+        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+
       });
+
+        if (!response.data.success) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send OTP',
+            error: response.data.message || 'OTP service error'
+          });
+        }
+
+        // Generate temporary token for verification
+        const tempToken = jwt.sign(
+          { id: user._id, purpose: 'login_verification' },
+          process.env.JWT_SECRET,
+          { expiresIn: '15m' }
+        );
+        
+
+        return res.status(200).json({
+          success: true,
+          message: 'OTP sent to registered mobile number',
+          data: {
+            verificationToken: tempToken,
+            mobileNumber: user.mobileNumber,
+            userId: user._id,
+            countryCode: user.countryCode,
+            profilePhoto: user.profilePhoto,
+            ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
+          }
+        });
+
+      } catch (apiError) {
+        console.error('OTP sending error:', apiError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to send OTP',
+          error: apiError.message || 'OTP service unavailable'
+        });
+      }
     }
 
     // If no authentication method is available
@@ -273,9 +334,9 @@ exports.registerPatient = async (req, res) => {
     
     // Send OTP via API request
     try {
-      const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
-        to: `${countryCode}${mobileNumber}`,
-        otp
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
+        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+
       });
 
       // Check if API responded with success
@@ -407,9 +468,14 @@ exports.registerAdmin = async (req, res) => {
     
     // Send OTP via API request
     try {
-      const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
-        to: `${countryCode}${mobileNumber}`,
-        otp
+      // const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
+      //   to: `${countryCode}${mobileNumber}`,
+      //   otp
+      // });
+
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
+        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+
       });
 
       // Check if API responded with success
@@ -782,9 +848,15 @@ exports.resendOTP = async (req, res) => {
 
     // Send OTP via API request with proper error handling
     try {
-      const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
-        to: `${user.countryCode}${mobileNumber}`,
-        otp
+      // const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
+      //   to: `${user.countryCode}${mobileNumber}`,
+      //   otp
+      // });
+
+
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
+        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+
       });
 
       // Check if the SMS service returned success
@@ -945,52 +1017,65 @@ exports.updateProfile = async (req, res) => {
 
 exports.updateEmail = async (req, res) => {
   try {
-    const { email } = req.body;
-
-    if (!email || !validator.isEmail(email)) {
+    const { newEmail, password } = req.body;
+    console.log("-------------", password);
+    if (!newEmail || !validator.isEmail(newEmail)) {
       return res.status(400).json({
         success: false,
         message: 'Please provide a valid email'
       });
     }
 
-    // Check if email already exists
-    // const existingUser = await User.findOne({ email });
-    // if (existingUser && existingUser._id.toString() !== req.user.id) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: 'Email already in use'
-    //   });
-    // }
+    // Fetch the user by ID
+    const user = await User.findById(req.user.id).select('+password');;
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
-    // Update user with new email (unverified)
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      {
-        email: email.toLowerCase(),
-        isEmailVerified: false
-      },
-      { new: true }
-    ).select('-password -otp');
 
-    // Send email verification request
+
+    // Verify password
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect password'
+      });
+    }
+
+    // Check if the new email already exists for another user
+    const existingUser = await User.findOne({ email: newEmail });
+    if (existingUser && existingUser._id.toString() !== req.user.id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already in use'
+      });
+    }
+
+    // Update email and mark as unverified
+    user.email = newEmail.toLowerCase();
+    user.isEmailVerified = false;
+    await user.save();
+
     // Generate email verification token
     const emailVerifyToken = jwt.sign(
-      { id: user._id, email, purpose: 'email_verification' },
+      { id: user._id, email: newEmail, purpose: 'email_verification' },
       process.env.JWT_SECRET,
       { expiresIn: '1d' }
     );
 
-    // Send email verification request with error handling
+    // Send email verification
     try {
       const response = await axios.post(`${transportStorageServiceUrl}/mail/sendEmailVerification`, {
         fullName: user.fullName,
-        email,
+        email: newEmail,
         token: emailVerifyToken,
-        url: `${process.env.USER_MANAGEMENT_SERVICE_URL}/users/verify-email`
+        url: process.env.FRONTEND_URL
       });
 
-      // Check if the email service returned success
       if (response.status !== 200) {
         throw new Error(response.data.message || 'Failed to send email verification');
       }
@@ -1006,14 +1091,14 @@ exports.updateEmail = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Email verification sent successfully',
-      data: { email, userId: user._id }
+      data: { email: newEmail, userId: user._id }
     });
 
   } catch (error) {
-    console.error('Error sending email verification:', error);
+    console.error('Error updating email:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to send email verification',
+      message: 'Failed to update email',
       error: error.message
     });
   }
@@ -1206,9 +1291,14 @@ exports.forgotPassword = async (req, res) => {
     // console.log(forgotPasswordVerifyToken) 
      // Send OTP via API request with error handling
      try {
-      const response = await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendOTP`, {
-        to: `${user.countryCode}${mobileNumber}`,
-        otp
+      // const response = await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendOTP`, {
+      //   to: `${user.countryCode}${mobileNumber}`,
+      //   otp
+      // });
+
+      const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
+        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+
       });
 
       if (response.data.success !== true) {
