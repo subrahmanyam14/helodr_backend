@@ -1096,7 +1096,7 @@ const generateDailyDashboard = async (req, res) => {
 
 const generateTopDoctorsAnalytics = async (req, res) => {
   try {
-    const { startDate, endDate, location = "defaultLocation" } = req.query;
+    const { startDate, endDate, location = "defaultLocation", limit = 3 } = req.query;
     const doctorIds = await getDoctorIdsByAdmin(req.user.id);
 
     // Validate inputs
@@ -1104,6 +1104,15 @@ const generateTopDoctorsAnalytics = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Doctor IDs are required"
+      });
+    }
+
+    // Validate and parse limit
+    const doctorLimit = parseInt(limit);
+    if (isNaN(doctorLimit) || doctorLimit < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Limit must be a positive integer"
       });
     }
 
@@ -1124,16 +1133,28 @@ const generateTopDoctorsAnalytics = async (req, res) => {
     // Convert doctorIds to ObjectIds
     const doctorObjectIds = doctorIds.map(id => new mongoose.Types.ObjectId(id));
 
-    // Get top doctors analytics
-    const topDoctorsData = await Appointment.aggregate([
+    // Alternative: Start with payments and join appointments
+    const topDoctorsData = await Payment.aggregate([
       {
         $match: {
           doctor: { $in: doctorObjectIds },
-          date: {
+          status: "captured",
+          createdAt: {
             $gte: startOfPeriod,
             $lte: endOfPeriod
           }
         }
+      },
+      {
+        $lookup: {
+          from: "appointments",
+          localField: "appointment",
+          foreignField: "_id",
+          as: "appointmentInfo"
+        }
+      },
+      {
+        $unwind: "$appointmentInfo"
       },
       {
         $lookup: {
@@ -1150,17 +1171,23 @@ const generateTopDoctorsAnalytics = async (req, res) => {
         $group: {
           _id: "$doctor",
           doctorInfo: { $first: "$doctorInfo" },
+          totalRevenue: { $sum: "$amount" },
           totalVisits: { $sum: 1 },
           completedVisits: {
             $sum: {
-              $cond: [{ $eq: ["$status", "completed"] }, 1, 0]
+              $cond: [{ $eq: ["$appointmentInfo.status", "completed"] }, 1, 0]
             }
           },
           averageRating: {
             $avg: {
               $cond: [
-                { $and: [{ $ne: ["$review.rating", null] }, { $ne: ["$review.rating", undefined] }] },
-                "$review.rating",
+                { 
+                  $and: [
+                    { $ne: ["$appointmentInfo.review.rating", null] }, 
+                    { $ne: ["$appointmentInfo.review.rating", undefined] }
+                  ]
+                },
+                "$appointmentInfo.review.rating",
                 null
               ]
             }
@@ -1168,7 +1195,12 @@ const generateTopDoctorsAnalytics = async (req, res) => {
           totalRatings: {
             $sum: {
               $cond: [
-                { $and: [{ $ne: ["$review.rating", null] }, { $ne: ["$review.rating", undefined] }] },
+                { 
+                  $and: [
+                    { $ne: ["$appointmentInfo.review.rating", null] }, 
+                    { $ne: ["$appointmentInfo.review.rating", undefined] }
+                  ]
+                },
                 1,
                 0
               ]
@@ -1176,20 +1208,16 @@ const generateTopDoctorsAnalytics = async (req, res) => {
           }
         }
       },
+      // Add appointments without payments to get complete visit count
       {
         $lookup: {
-          from: "payments",
+          from: "appointments",
           let: { doctorId: "$_id" },
           pipeline: [
             {
               $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$doctor", "$doctorId"] },
-                    { $eq: ["$status", "captured"] }
-                  ]
-                },
-                createdAt: {
+                $expr: { $eq: ["$doctor", "$$doctorId"] },
+                date: {
                   $gte: startOfPeriod,
                   $lte: endOfPeriod
                 }
@@ -1198,18 +1226,29 @@ const generateTopDoctorsAnalytics = async (req, res) => {
             {
               $group: {
                 _id: null,
-                totalRevenue: { $sum: "$amount" }
+                totalAppointments: { $sum: 1 },
+                completedAppointments: {
+                  $sum: {
+                    $cond: [{ $eq: ["$status", "completed"] }, 1, 0]
+                  }
+                }
               }
             }
           ],
-          as: "revenueInfo"
+          as: "allAppointments"
         }
       },
       {
         $addFields: {
-          revenue: {
+          actualVisits: {
             $ifNull: [
-              { $arrayElemAt: ["$revenueInfo.totalRevenue", 0] },
+              { $arrayElemAt: ["$allAppointments.totalAppointments", 0] },
+              0
+            ]
+          },
+          actualCompletedVisits: {
+            $ifNull: [
+              { $arrayElemAt: ["$allAppointments.completedAppointments", 0] },
               0
             ]
           }
@@ -1228,8 +1267,9 @@ const generateTopDoctorsAnalytics = async (req, res) => {
               " years"
             ]
           },
-          revenue: 1,
-          visits: "$totalVisits",
+          revenue: "$totalRevenue", // Use the calculated revenue
+          visits: "$actualVisits",
+          completedVisits: "$actualCompletedVisits",
           rating: {
             $round: [
               {
@@ -1251,7 +1291,7 @@ const generateTopDoctorsAnalytics = async (req, res) => {
         $sort: { revenue: -1 }
       },
       {
-        $limit: 3
+        $limit: doctorLimit
       }
     ]);
 
@@ -1263,12 +1303,13 @@ const generateTopDoctorsAnalytics = async (req, res) => {
       experience: doctor.experience,
       revenue: doctor.revenue,
       visits: doctor.visits,
+      completedVisits: doctor.completedVisits,
       rating: doctor.rating,
       profileImage: doctor.profileImage
     }));
 
-    // Fill with dummy data if less than 3 doctors
-    while (doctorsWithRank.length < 3) {
+    // Fill with dummy data if less than requested limit
+    while (doctorsWithRank.length < doctorLimit) {
       doctorsWithRank.push({
         rank: doctorsWithRank.length + 1,
         name: "Dr. Not Available",
@@ -1276,6 +1317,7 @@ const generateTopDoctorsAnalytics = async (req, res) => {
         experience: "0 years",
         revenue: 0,
         visits: 0,
+        completedVisits: 0,
         rating: 0,
         profileImage: "https://archive.org/download/default_profile/default-avatar.png"
       });
@@ -1303,4 +1345,254 @@ const generateTopDoctorsAnalytics = async (req, res) => {
   }
 };
 
-module.exports = {AdminDashboardAnalytics, RevenueChartController, generateQuarterlyRevenue, generateDailyDashboard, generateTopDoctorsAnalytics};
+const getPatientAnalytics = async (req, res) => {
+  try {
+    const { location = 'defaultLocation', month, year } = req.query;
+    const doctorIdArray = await getDoctorIdsByAdmin(req.user.id);
+      
+    // Set date range (default to current month/year if not provided)
+    const currentDate = new Date();
+    const targetMonth = month ? parseInt(month) - 1 : currentDate.getMonth(); // 0-indexed
+    const targetYear = year ? parseInt(year) : currentDate.getFullYear();
+    
+    const startDate = new Date(targetYear, targetMonth, 1);
+    const endDate = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59);
+    
+    // Build match conditions
+    const matchConditions = {
+      date: { $gte: startDate, $lte: endDate }
+    };
+    
+    if (doctorIdArray.length > 0) {
+      matchConditions.doctor = { $in: doctorIdArray };
+    }
+    
+    // Get all appointments for the specified period and doctors
+    const appointments = await Appointment.find(matchConditions)
+      .populate('patient', 'fullName email gender dateOfBirth')
+      .populate('doctor', 'name');
+    
+    // Calculate total appointments
+    const totalAppointments = appointments.length;
+    
+    // Get unique patient IDs
+    const uniquePatientIds = [...new Set(appointments.map(apt => apt.patient._id.toString()))];
+    
+    // Calculate new patients (first-time patients in this period)
+    const newPatientIds = new Set();
+    for (const appointment of appointments) {
+      const patientId = appointment.patient._id;
+      const earlierAppointment = await Appointment.findOne({
+        patient: patientId,
+        date: { $lt: startDate },
+        ...(doctorIdArray.length > 0 && { doctor: { $in: doctorIdArray } })
+      });
+      
+      if (!earlierAppointment) {
+        newPatientIds.add(patientId.toString());
+      }
+    }
+    
+    // Calculate revisit rate
+    const revisitPatients = uniquePatientIds.length - newPatientIds.size;
+    const revisitRate = uniquePatientIds.length > 0 
+      ? Math.round((revisitPatients / uniquePatientIds.length) * 100) + '%'
+      : '0%';
+    
+    // Calculate average wait time (mock calculation - you may need to adjust based on actual data)
+    const avgWaitTime = appointments.length > 0 
+      ? Math.round(Math.random() * 30 + 10) + ' min' // Mock data
+      : '0 min';
+    
+    // Gender distribution
+    const genderCount = { male: 0, female: 0, other: 0 };
+    appointments.forEach(apt => {
+      const gender = apt.patient.gender || 'other';
+      if (gender === 'prefer not to say') {
+        genderCount.other++;
+      } else {
+        genderCount[gender] = (genderCount[gender] || 0) + 1;
+      }
+    });
+    
+    // Age demographics
+    const ageGroups = { '0-18': 0, '19-35': 0, '36-50': 0, '51+': 0 };
+    appointments.forEach(apt => {
+      if (apt.patient.dateOfBirth) {
+        const age = calculateAge(apt.patient.dateOfBirth);
+        if (age <= 18) ageGroups['0-18']++;
+        else if (age <= 35) ageGroups['19-35']++;
+        else if (age <= 50) ageGroups['36-50']++;
+        else ageGroups['51+']++;
+      }
+    });
+    
+    // Patient satisfaction from reviews
+    const reviewedAppointments = appointments.filter(apt => apt.review && apt.review.rating);
+    const totalReviews = reviewedAppointments.length;
+    const ratingsBreakdown = { '5': 0, '4': 0, '3': 0, '2': 0, '1': 0 };
+    let totalRatingSum = 0;
+    
+    reviewedAppointments.forEach(apt => {
+      const rating = apt.review.rating.toString();
+      ratingsBreakdown[rating]++;
+      totalRatingSum += apt.review.rating;
+    });
+    
+    const overallRating = totalReviews > 0 ? (totalRatingSum / totalReviews).toFixed(1) : 0;
+    
+    // Monthly appointment trends (last 6 months)
+    const monthlyTrends = {};
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                       'July', 'August', 'September', 'October', 'November', 'December'];
+    
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(targetYear, targetMonth - i, 1);
+      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+      const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+      
+      const monthlyCount = await Appointment.countDocuments({
+        date: { $gte: monthStart, $lte: monthEnd },
+        ...(doctorIdArray.length > 0 && { doctor: { $in: doctorIdArray } })
+      });
+      
+      monthlyTrends[monthNames[date.getMonth()]] = monthlyCount;
+    }
+    
+    // Patient retention rate (quarterly)
+    const currentQuarter = Math.floor(targetMonth / 3) + 1;
+    const retentionRates = {};
+    
+    for (let q = 1; q <= 4; q++) {
+      if (q <= currentQuarter) {
+        // Calculate actual retention for completed quarters
+        const quarterStart = new Date(targetYear, (q - 1) * 3, 1);
+        const quarterEnd = new Date(targetYear, q * 3, 0);
+        
+        const quarterAppointments = await Appointment.find({
+          date: { $gte: quarterStart, $lte: quarterEnd },
+          ...(doctorIdArray.length > 0 && { doctor: { $in: doctorIdArray } })
+        });
+        
+        const quarterUniquePatients = [...new Set(quarterAppointments.map(apt => apt.patient.toString()))];
+        const returnPatients = quarterUniquePatients.filter(async (patientId) => {
+          const prevAppointment = await Appointment.findOne({
+            patient: patientId,
+            date: { $lt: quarterStart },
+            ...(doctorIdArray.length > 0 && { doctor: { $in: doctorIdArray } })
+          });
+          return prevAppointment !== null;
+        });
+        
+        retentionRates[`Q${q}`] = quarterUniquePatients.length > 0 
+          ? Math.round((returnPatients.length / quarterUniquePatients.length) * 100)
+          : 75 + q * 2; // Mock progressive values
+      } else {
+        retentionRates[`Q${q}`] = 75 + q * 2; // Placeholder for future quarters
+      }
+    }
+    
+    // Common health issues (from prescription diagnosis)
+    const healthIssues = {};
+    appointments.forEach(apt => {
+      if (apt.prescription && apt.prescription.diagnosis) {
+        const diagnosis = apt.prescription.diagnosis.toLowerCase();
+        // Simple keyword matching for common conditions
+        if (diagnosis.includes('fever')) healthIssues['Fever'] = (healthIssues['Fever'] || 0) + 1;
+        else if (diagnosis.includes('diabetes')) healthIssues['Diabetes'] = (healthIssues['Diabetes'] || 0) + 1;
+        else if (diagnosis.includes('hypertension') || diagnosis.includes('blood pressure')) 
+          healthIssues['Hypertension'] = (healthIssues['Hypertension'] || 0) + 1;
+        else if (diagnosis.includes('arthritis') || diagnosis.includes('joint')) 
+          healthIssues['Arthritis'] = (healthIssues['Arthritis'] || 0) + 1;
+        else if (diagnosis.includes('respiratory') || diagnosis.includes('cough') || diagnosis.includes('asthma')) 
+          healthIssues['Respiratory'] = (healthIssues['Respiratory'] || 0) + 1;
+        else if (diagnosis.includes('skin') || diagnosis.includes('rash')) 
+          healthIssues['Skin Conditions'] = (healthIssues['Skin Conditions'] || 0) + 1;
+      }
+    });
+    
+    const commonHealthIssues = Object.entries(healthIssues)
+      .map(([issue, count]) => ({ issue, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+    
+    // Appointment frequency analysis
+    const patientVisitCounts = {};
+    appointments.forEach(apt => {
+      const patientId = apt.patient._id.toString();
+      patientVisitCounts[patientId] = (patientVisitCounts[patientId] || 0) + 1;
+    });
+    
+    const frequencyBuckets = {
+      firstVisit: { count: 0, percentage: 0 },
+      '2to5Visits': { count: 0, percentage: 0 },
+      '6to10Visits': { count: 0, percentage: 0 },
+      '10PlusVisits': { count: 0, percentage: 0 }
+    };
+    
+    Object.values(patientVisitCounts).forEach(count => {
+      if (count === 1) frequencyBuckets.firstVisit.count++;
+      else if (count >= 2 && count <= 5) frequencyBuckets['2to5Visits'].count++;
+      else if (count >= 6 && count <= 10) frequencyBuckets['6to10Visits'].count++;
+      else frequencyBuckets['10PlusVisits'].count++;
+    });
+    
+    // Calculate percentages
+    const totalUniquePatients = uniquePatientIds.length;
+    Object.keys(frequencyBuckets).forEach(key => {
+      frequencyBuckets[key].percentage = totalUniquePatients > 0 
+        ? Math.round((frequencyBuckets[key].count / totalUniquePatients) * 100)
+        : 0;
+    });
+    
+    // Construct response
+    const analyticsData = {
+      patientAnalytics: {
+        location,
+        summary: {
+          totalPatients: totalAppointments,
+          newPatients: newPatientIds.size,
+          revisitRate,
+          averageWaitTime: avgWaitTime
+        },
+        genderDistribution: genderCount,
+        ageDemographics: ageGroups,
+        patientSatisfaction: {
+          overallRating: parseFloat(overallRating),
+          totalReviews,
+          ratingsBreakdown
+        },
+        monthlyAppointmentTrends: monthlyTrends,
+        patientRetentionRate: retentionRates,
+        commonHealthIssues,
+        appointmentFrequency: frequencyBuckets
+      }
+    };
+    
+    res.status(200).json(analyticsData);
+    
+  } catch (error) {
+    console.error('Error fetching patient analytics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch patient analytics',
+      error: error.message
+    });
+  }
+};
+
+// Helper function to calculate age
+const calculateAge = (dateOfBirth) => {
+  const today = new Date();
+  const birthDate = new Date(dateOfBirth);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
+  
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  
+  return age;
+};
+
+module.exports = {AdminDashboardAnalytics, RevenueChartController, generateQuarterlyRevenue, generateDailyDashboard, generateTopDoctorsAnalytics, getPatientAnalytics};

@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const {AdminDashboardAnalytics, RevenueChartController, generateQuarterlyRevenue, generateDailyDashboard, generateTopDoctorsAnalytics} = require('../controllers/dashboardController.js');
+const {AdminDashboardAnalytics, RevenueChartController, generateQuarterlyRevenue, generateDailyDashboard, generateTopDoctorsAnalytics, getPatientAnalytics} = require('../controllers/dashboardController.js');
+const {doctorAnalyticsController} = require("../controllers/doctorController.js");
+const { fetchDoctorAnalytics, getDoctorProfile } = require("../controllers/doctorListController.js");
+const { getPatientList, getPatientProfile } = require("../controllers/patientController.js");
 const {getDoctorIdsByAdmin} = require("../utils/doctorIds.js");
 const { protect, authorize } = require("../middleware/authMiddleware.js");
 
@@ -144,5 +147,17 @@ router.get("/quarterly-revenue", protect, authorize("admin"), generateQuarterlyR
 router.get("/daily", protect, authorize("admin"), generateDailyDashboard);
 
 router.get("/top-doctors-analytics", protect, authorize("admin"), generateTopDoctorsAnalytics);
+
+router.get("/patient-analytics", protect, authorize("admin"), getPatientAnalytics);
+
+router.get('/doctors-analytics', protect, authorize("admin"), doctorAnalyticsController.getDoctorAnalytics.bind(doctorAnalyticsController));
+
+router.get('/list-doctor', protect, authorize("admin"), fetchDoctorAnalytics);
+
+router.get('/list-patient', protect, authorize("admin"), getPatientList);
+
+router.get('/doctor-profile/:doctorId', protect, authorize("admin"), getDoctorProfile);
+
+router.get('/patient-details/:patientId', protect, authorize("admin"), getPatientProfile);
 
 module.exports = router;
