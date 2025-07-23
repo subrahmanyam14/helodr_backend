@@ -62,7 +62,7 @@ const checkPaymentStatus = async (req, res) => {
 
   try {
     const order = await razorpay.orders.fetch(orderId);
-    
+
     res.status(200).json({
       success: true,
       status: order.status,
@@ -72,9 +72,9 @@ const checkPaymentStatus = async (req, res) => {
     });
   } catch (error) {
     console.error("Payment Status Check Error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to check payment status" 
+    res.status(500).json({
+      success: false,
+      message: "Failed to check payment status"
     });
   }
 };
@@ -89,6 +89,7 @@ const verifyRazorpayPayment = async (req, res) => {
     doctorId,
     patientId,
     amount,
+    gst
   } = req.body;
 
   const session = await mongoose.startSession();
@@ -97,7 +98,7 @@ const verifyRazorpayPayment = async (req, res) => {
   try {
     // First verify the payment with Razorpay
     const payment = await razorpay.payments.fetch(razorpay_payment_id);
-    
+
     if (payment.status !== 'captured') {
       await session.abortTransaction();
       session.endSession();
@@ -118,7 +119,7 @@ const verifyRazorpayPayment = async (req, res) => {
     }
 
     // Get appointment details for upcoming earnings
-    const appointment = await Appointment.findById(appointmentId).session(session);
+    const appointment = await Appointment.findById(appointmentId).populate("doctor").session(session);
     if (!appointment) {
       await session.abortTransaction();
       session.endSession();
@@ -126,9 +127,12 @@ const verifyRazorpayPayment = async (req, res) => {
     }
 
     // Calculate amounts
-    const baseAmount = parseInt(amount);
-    const gstAmount = Math.round(baseAmount * 18 / 100);
-    const totalAmount = baseAmount + gstAmount;
+    const totalAmount = parseInt(amount);
+    const gstPercentage = parseInt(gst);
+
+    // Calculate base amount and GST amount
+    const baseAmount = Math.round(totalAmount / (1 + gstPercentage / 100));
+    const gstAmount = totalAmount - baseAmount;
 
     // Create payment record with appointment date
     const paymentData = {
@@ -149,57 +153,49 @@ const verifyRazorpayPayment = async (req, res) => {
 
     // Use the createPayment method which now handles upcoming earnings
     const paymentDoc = await Payment.createPayment(paymentData, appointment.date);
-    
+
     // Create notifications
     const notificationDocs = [
       new Notification({
         referenceId: appointmentId,
         user: patientId,
         message: "Appointment confirmed",
-        type: "payment"
+        type: "appoinment_confirmation"
       }),
       new Notification({
         referenceId: appointmentId,
-        user: doctorId,
-        message: "Appointment scheduled",
-        type: "payment"
+        user: appointment.doctor.user,
+        message: "New appointment scheduled",
+        type: "appoinment_scheduled"
       })
     ];
-    
+
     await Notification.insertMany(notificationDocs, { session });
-    
+
     // Update appointment status
     appointment.status = "confirmed";
     appointment.payment = paymentDoc._id;
     await appointment.save({ session });
-    
+
     await session.commitTransaction();
     session.endSession();
-    
-    // Get the upcoming earning details for response
-    const upcomingEarning = await UpcomingEarnings.findById(paymentDoc.upcomingEarning)
-      .populate('fullName');
 
     res.status(200).json({
       success: true,
       message: "Payment verified and captured successfully",
       payment: paymentDoc,
       razorpayOrderId: razorpay_order_id,
-      razorpayPaymentId: razorpay_payment_id,
-      upcomingEarning: {
-        amount: upcomingEarning.amount,
-        scheduledDate: upcomingEarning.scheduledDate
-      }
+      razorpayPaymentId: razorpay_payment_id
     });
 
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
     console.error("Razorpay Payment Verification Error:", error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: "Payment verification failed",
-      error: error.message 
+      error: error.message
     });
   }
 };
@@ -220,6 +216,11 @@ const createDummyPayment = async (req, res) => {
     const gstAmount = Math.round(baseAmount * 18 / 100);
     const totalAmount = baseAmount + gstAmount;
 
+    const appointment = await Appointment.findById(appointmentId).populate("doctor");
+    if(!appointment)
+    {
+      return res.status(404).send({error: "Appointment not found"});
+    }
     // Use the static method to create the payment and handle all related logic
     const payment = await Payment.createPayment({
       appointment: appointmentId,
@@ -243,13 +244,13 @@ const createDummyPayment = async (req, res) => {
         referenceId: appointmentId,
         user: patientId,
         message: "Appointment confirmed",
-        type: "payment"
+        type: "appoinment_confirmation"
       }),
       new Notification({
         referenceId: appointmentId,
-        user: doctorId,
-        message: "Appointment scheduled",
-        type: "payment"
+        user: appointment.doctor.user,
+        message: "New appointment scheduled",
+        type: "appoinment_scheduled"
       })
     ];
 
@@ -284,46 +285,46 @@ const createDummyPayment = async (req, res) => {
 const completeAppointment = async (req, res) => {
   try {
     const { appointmentId } = req.params;
-    
+
     const appointment = await Appointment.findById(appointmentId);
-    
+
     if (!appointment) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Appointment not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found"
       });
     }
-    
+
     if (appointment.status === "completed") {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Appointment is already marked as completed" 
+      return res.status(400).json({
+        success: false,
+        message: "Appointment is already marked as completed"
       });
     }
-    
+
     // Find the payment for this appointment
     const payment = await Payment.findOne({ appointment: appointmentId })
       .populate('upcomingEarning');
-    
+
     if (!payment) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Payment not found for this appointment" 
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found for this appointment"
       });
     }
-    
+
     const session = await mongoose.startSession();
     session.startTransaction();
-    
+
     try {
       // Update appointment status
       appointment.status = "completed";
       await appointment.save({ session });
-      
+
       // Process the payment to credit doctor's wallet
       if (payment.upcomingEarning && payment.upcomingEarning.status === "pending") {
         const result = await payment.processPayment();
-        
+
         // Create notification for doctor
         await Notification.create([{
           referenceId: appointmentId,
@@ -331,10 +332,10 @@ const completeAppointment = async (req, res) => {
           message: `₹${result.doctorShare} added to your wallet for completed appointment`,
           type: "wallet"
         }], { session });
-        
+
         await session.commitTransaction();
         session.endSession();
-        
+
         return res.status(200).json({
           success: true,
           message: "Appointment completed and payment processed",
@@ -345,7 +346,7 @@ const completeAppointment = async (req, res) => {
       } else {
         await session.commitTransaction();
         session.endSession();
-        
+
         return res.status(200).json({
           success: true,
           message: "Appointment completed but no pending payment to process",
@@ -548,28 +549,28 @@ const getUpcomingEarnings = async (req, res) => {
   try {
     const { doctorId } = req.params;
     const { status, from, to } = req.query;
-    
+
     const query = { doctor: doctorId };
-    
+
     // Add optional filters
     if (status) query.status = status;
-    
+
     // Date range filter
     if (from || to) {
       query.scheduledDate = {};
       if (from) query.scheduledDate.$gte = new Date(from);
       if (to) query.scheduledDate.$lte = new Date(to);
     }
-    
+
     const upcomingEarnings = await UpcomingEarnings.find(query)
       .populate({
         path: 'appointment',
         select: 'appointmentType date slot status',
       })
       .sort({ scheduledDate: 1 });
-    
+
     const totalAmount = await UpcomingEarnings.getTotalUpcomingEarnings(doctorId);
-    
+
     res.status(200).json({
       success: true,
       totalUpcoming: totalAmount,
@@ -589,44 +590,44 @@ const getUpcomingEarnings = async (req, res) => {
 const getDoctorWalletStats = async (req, res) => {
   try {
     const { doctorId } = req.params;
-    
+
     // Get wallet details
     const wallet = await Wallet.findOne({ doctor: doctorId });
-    
+
     if (!wallet) {
       return res.status(404).json({
         success: false,
         message: "Wallet not found for this doctor"
       });
     }
-    
+
     // Get upcoming earnings total
     const upcomingTotal = await UpcomingEarnings.getTotalUpcomingEarnings(doctorId);
-    
+
     // Get recent transactions
     const recentTransactions = await Transaction.find({
       user: doctorId,
       type: { $in: ["doctor_credit", "withdrawal_processed"] }
     })
-    .sort({ createdAt: -1 })
-    .limit(5);
-    
+      .sort({ createdAt: -1 })
+      .limit(5);
+
     // Get upcoming appointments with earnings
     const upcomingAppointments = await UpcomingEarnings.find({
       doctor: doctorId,
       status: "pending"
     })
-    .populate({
-      path: 'appointment',
-      select: 'appointmentType date slot status patient',
-      populate: {
-        path: 'patient',
-        select: 'fullName'
-      }
-    })
-    .sort({ scheduledDate: 1 })
-    .limit(5);
-    
+      .populate({
+        path: 'appointment',
+        select: 'appointmentType date slot status patient',
+        populate: {
+          path: 'patient',
+          select: 'fullName'
+        }
+      })
+      .sort({ scheduledDate: 1 })
+      .limit(5);
+
     res.status(200).json({
       success: true,
       wallet: {
@@ -653,34 +654,34 @@ const getDoctorWalletStats = async (req, res) => {
 const refundPayment = async (req, res) => {
   const { paymentId } = req.params;
   const { reason } = req.body;
-  
+
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
     // Find the payment
     const payment = await Payment.findById(paymentId)
       .populate('appointment')
       .session(session);
-    
+
     if (!payment) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ 
-        success: false, 
-        message: "Payment not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found"
       });
     }
-    
+
     if (payment.status === "refunded") {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ 
-        success: false, 
-        message: "Payment has already been refunded" 
+      return res.status(400).json({
+        success: false,
+        message: "Payment has already been refunded"
       });
     }
-    
+
     // Check if this is a Razorpay payment that needs to be refunded via API
     if (payment.gateway && payment.gateway.name === "razorpay" && payment.gateway.transactionId) {
       try {
@@ -689,7 +690,7 @@ const refundPayment = async (req, res) => {
           amount: payment.totalamount * 100, // Convert to paisa
           notes: { reason: reason || "Appointment cancelled" }
         });
-        
+
         // Update payment record with refund details
         payment.refund = {
           refundId: refund.id,
@@ -701,24 +702,24 @@ const refundPayment = async (req, res) => {
         console.error("Razorpay Refund Error:", razorpayError);
         await session.abortTransaction();
         session.endSession();
-        return res.status(500).json({ 
-          success: false, 
+        return res.status(500).json({
+          success: false,
           message: "Failed to process refund with payment gateway",
           error: razorpayError.message
         });
       }
     }
-    
+
     // Update payment status
     payment.status = "refunded";
     await payment.save({ session });
-    
+
     // Update appointment status
     if (payment.appointment) {
       payment.appointment.status = "cancelled";
       await payment.appointment.save({ session });
     }
-    
+
     // Cancel upcoming earnings if they exist
     if (payment.upcomingEarning) {
       await UpcomingEarnings.findByIdAndUpdate(
@@ -727,7 +728,7 @@ const refundPayment = async (req, res) => {
         { session }
       );
     }
-    
+
     // Create refund transaction record
     const transaction = new Transaction({
       user: payment.patient,
@@ -738,9 +739,9 @@ const refundPayment = async (req, res) => {
       status: "completed",
       notes: `Refund for appointment: ${reason || "Appointment cancelled"}`
     });
-    
+
     await transaction.save({ session });
-    
+
     // Create notifications
     const notificationDocs = [
       new Notification({
@@ -756,12 +757,12 @@ const refundPayment = async (req, res) => {
         type: "appointment"
       })
     ];
-    
+
     await Notification.insertMany(notificationDocs, { session });
-    
+
     await session.commitTransaction();
     session.endSession();
-    
+
     res.status(200).json({
       success: true,
       message: "Payment refunded successfully",
@@ -786,18 +787,18 @@ const refundPayment = async (req, res) => {
 const cancelAppointment = async (req, res) => {
   const { appointmentId } = req.params;
   const { reason } = req.body;
-  
+
   try {
     // Assuming req.user contains the logged-in user's details
     // Check if the user is authorized to cancel this appointment
     // This would be a separate middleware or function call
 
     const result = await RefundService.processAppointmentCancellation(
-      appointmentId, 
-      'patient', 
+      appointmentId,
+      'patient',
       reason || 'Cancelled by patient'
     );
-    
+
     res.status(200).json({
       success: true,
       message: `Appointment cancelled successfully. ${result.refundPercentage}% refund processed.`,
@@ -819,7 +820,7 @@ const cancelAppointment = async (req, res) => {
 const rejectAppointment = async (req, res) => {
   const { appointmentId } = req.params;
   const { reason } = req.body;
-  
+
   try {
     // Assuming req.user contains the logged-in doctor's details
     // Check if the doctor is authorized to reject this appointment
@@ -830,7 +831,7 @@ const rejectAppointment = async (req, res) => {
       'doctor',
       reason || 'Rejected by doctor'
     );
-    
+
     res.status(200).json({
       success: true,
       message: 'Appointment rejected successfully and refund processed',
@@ -852,18 +853,18 @@ const rejectAppointment = async (req, res) => {
 const adminProcessRefund = async (req, res) => {
   const { paymentId } = req.params;
   const { amount, reason } = req.body;
-  
+
   try {
     // Validate admin permissions
     // This would be done in middleware
-    
+
     const result = await RefundService.processCustomRefund(
       paymentId,
       amount,
       reason || 'Admin initiated refund',
       'admin'
     );
-    
+
     res.status(200).json({
       success: true,
       message: 'Refund processed successfully',
@@ -884,10 +885,10 @@ const adminProcessRefund = async (req, res) => {
  */
 const getPotentialRefund = async (req, res) => {
   const { appointmentId } = req.params;
-  
+
   try {
     const refundInfo = await RefundService.calculatePotentialRefund(appointmentId);
-    
+
     res.status(200).json({
       success: true,
       message: 'Potential refund calculated',
@@ -903,20 +904,20 @@ const getPotentialRefund = async (req, res) => {
   }
 };
 // Export all controller functions
-module.exports = { 
-  createRazorpayOrder, 
-  checkPaymentStatus, 
-  verifyRazorpayPayment, 
-  getPaymentDetails, 
-  getUserPayments, 
-  getPaymentStats, 
-  getPayments, 
+module.exports = {
+  createRazorpayOrder,
+  checkPaymentStatus,
+  verifyRazorpayPayment,
+  getPaymentDetails,
+  getUserPayments,
+  getPaymentStats,
+  getPayments,
   createDummyPayment,
   completeAppointment,
   getUpcomingEarnings,
   getDoctorWalletStats,
   refundPayment,
-  rejectAppointment, 
+  rejectAppointment,
   cancelAppointment,
   getPotentialRefund,
   adminProcessRefund

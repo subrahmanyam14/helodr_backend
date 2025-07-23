@@ -269,6 +269,10 @@ const doctorSchema = new mongoose.Schema({
   totalRatings: {
     type: Number,
     default: 0
+  },
+  meetingLink: {
+    type: String,
+    required: true
   }
 });
 

@@ -38,26 +38,28 @@ const startNotificationListener = () => {
                             subject: "Appointment Confirmation",
                             text: message
                         });
-                    } else {
-                        await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendMessage`, {
-                            to: appointment.patient.countryCode + appointment.patient.mobileNumber,
-                            message
-                        });
-                    }
+                    } 
+                    // else {
+                    //     await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendMessage`, {
+                    //         to: appointment.patient.countryCode + appointment.patient.mobileNumber,
+                    //         message
+                    //     });
+                    // }
 
                     // Send to doctor as well
                     if (appointment.doctor.emailVerified) {
-                        await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendMail`, {
+                        await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendAppointmentConfirmation`, {
                             to: appointment.doctor.email,
                             subject: "New Appointment Scheduled",
                             text: message
                         });
-                    } else {
-                        await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendMessage`, {
-                            to: appointment.doctor.countryCode + appointment.doctor.mobileNumber,
-                            message
-                        });
-                    }
+                    } 
+                    // else {
+                    //     await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendMessage`, {
+                    //         to: appointment.doctor.countryCode + appointment.doctor.mobileNumber,
+                    //         message
+                    //     });
+                    // }
                 }
             } catch (err) {
                 console.error("Error sending notification:", err);

@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 const axios = require("axios");
+const Appointment = require("../models/Appointment");
 require("dotenv").config();
 
 // Initialize processed notifications set to prevent duplicate processing
@@ -58,25 +59,121 @@ const sendNotification = async (notification) => {
     
     // Prepare notification content
     const notificationSubject = getNotificationSubject(notification.type);
-    const notificationMessage = notification.message;
     
-    // Send via email if user has verified email
-    // if (user.isEmailVerified && user.email) {
-    //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendMail`, {
-    //     to: user.email,
-    //     subject: notificationSubject,
-    //     text: notificationMessage
-    //   });
-    //   console.log(`Email notification sent to ${user.email}`);
-    // }
-    
-    // Send via SMS if user has verified mobile
-    if (user.isMobileVerified && user.mobileNumber) {
-      await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendMessage`, {
-        to: user.countryCode + user.mobileNumber,
-        message: notificationMessage
-      });
-      console.log(`SMS notification sent to ${user.countryCode}${user.mobileNumber}`);
+    // Determine which endpoints to use based on notification type
+    switch (notificationType) {
+      case "appoinment_scheduled":
+        if (user.isEmailVerified && user.email) {
+          const appointmentData = await Appointment.findById(notification._id).populate("patient");
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendAppointmentScheduled`, {
+            email: user.email,  
+            sub: notificationSubject,
+            patientName: appointmentData.patient.fullName,
+            doctorName: user.fullName,
+            patientAge: appointmentData.patient.age,
+            patientGender: appointmentData.patient.gender,
+            appointmentDate: appointmentData.date,
+            appointmentStartTime: appointmentData.slot.startTime,
+            appointmentEndTime: appointmentData.slot.endTime,
+            patientProblem: appointmentData.reason,
+            meetingLink: appointmentData.meetingLink
+          });
+          console.log(`Email notification (${notificationType}) sent to ${user.email}`);
+        }
+        // if (user.isMobileVerified && user.mobileNumber) {
+        //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentConfirmation`, smsPayload);
+        //   console.log(`SMS notification (${notificationType}) sent to ${user.mobileNumber}`);
+        // }
+        break;
+      case "appointment_confirmation":
+        if (user.isEmailVerified && user.email) {
+          const appointmentData = await Appointment.findById(notification._id).populate("doctor");
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendAppointmentConfirmation`, {
+            email: user.email,  
+            sub: notificationSubject,
+            patientName: user.fullName,
+            doctorName: appointmentData.doctor.fullName,
+            specialization: appointmentData.doctor.specialization.join(", "),
+            appointmentDate: appointmentData.date,
+            appointmentStartTime: appointmentData.slot.startTime,
+            appointmentEndTime: appointmentData.slot.endTime,
+            patientProblem: appointmentData.reason,
+            meetingLink: appointmentData.meetingLink
+          });
+          console.log(`Email notification (${notificationType}) sent to ${user.email}`);
+        }
+        // if (user.isMobileVerified && user.mobileNumber) {
+        //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentConfirmation`, smsPayload);
+        //   console.log(`SMS notification (${notificationType}) sent to ${user.mobileNumber}`);
+        // }
+        break;
+      case "appointment_reschedule":
+        if (user.isEmailVerified && user.email) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendAppointmentConfirmation`, emailPayload);
+          console.log(`Email notification (${notificationType}) sent to ${user.email}`);
+        }
+        if (user.isMobileVerified && user.mobileNumber) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentConfirmation`, smsPayload);
+          console.log(`SMS notification (${notificationType}) sent to ${user.mobileNumber}`);
+        }
+        break;
+
+      case "appointment_cancelation":
+        if (user.isEmailVerified && user.email) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendAppointmentCancellation`, emailPayload);
+          console.log(`Email notification (cancellation) sent to ${user.email}`);
+        }
+        if (user.isMobileVerified && user.mobileNumber) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentCancellation`, smsPayload);
+          console.log(`SMS notification (cancellation) sent to ${user.mobileNumber}`);
+        }
+        break;
+
+      case "appointment_reminder_1-day":
+      case "appointment_reminder_1-hour":
+      case "appointment_reminder_30-min":
+      case "appointment_reminder_10-min":
+        if (user.isEmailVerified && user.email) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendAppointmentReminder`, {
+            ...emailPayload,
+            reminderType: notificationType.split('_').pop() // Extracts "1-day", "1-hour", etc.
+          });
+          console.log(`Email reminder (${notificationType}) sent to ${user.email}`);
+        }
+        if (user.isMobileVerified && user.mobileNumber) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentReminder`, {
+            ...smsPayload,
+            reminderType: notificationType.split('_').pop()
+          });
+          console.log(`SMS reminder (${notificationType}) sent to ${user.mobileNumber}`);
+        }
+        break;
+
+      case "payment_confirmation":
+        if (user.isEmailVerified && user.email) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendPaymentConfirmation`, emailPayload);
+          console.log(`Payment confirmation email sent to ${user.email}`);
+        }
+        if (user.isMobileVerified && user.mobileNumber) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendPaymentConfirmation`, smsPayload);
+          console.log(`Payment confirmation SMS sent to ${user.mobileNumber}`);
+        }
+        break;
+
+      case "refund_initiate":
+        if (user.isEmailVerified && user.email) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/email/sendRefundInitiation`, emailPayload);
+          console.log(`Refund initiation email sent to ${user.email}`);
+        }
+        if (user.isMobileVerified && user.mobileNumber) {
+          await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendRefundInitiation`, smsPayload);
+          console.log(`Refund initiation SMS sent to ${user.mobileNumber}`);
+        }
+        break;
+
+      default:
+        console.warn(`Unknown notification type: ${notificationType}`);
+        break;
     }
     
     // Mark notification as sent in the database
@@ -116,6 +213,16 @@ const getNotificationSubject = (type) => {
       return "Appointment Reminder - Starting Soon";
     case "appointment_reminder_30-min":
       return "Appointment Reminder - In 30 Minutes";
+    case "appoinment_scheduled": 
+      return "Appointment scheduled";
+    case "appointment_cancelation": 
+      return "Appointment cancelation";
+    case "appointment_reschedule": 
+      return "Appointment rescheduled";
+    case "payment_confirmation": 
+      return "Payment confimation";
+    case "refund_initiate": 
+      return "Refund Initiated";
     default:
       return "Notification from Health App";
   }
@@ -132,7 +239,7 @@ const initNotificationMonitorService = async () => {
     // Process any unsent notifications
     const unsentNotifications = await Notification.find({
       status: { $ne: "sent" }
-    }).populate("user");
+    }).populate("user").populate("doctor");
     
     console.log(`Processing ${unsentNotifications.length} unsent notifications...`);
     

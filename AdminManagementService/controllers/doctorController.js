@@ -56,12 +56,12 @@ class DoctorAnalyticsController {
         prevMonthEnd = moment().month(prevMonthIndex).year(currentYear).endOf('month');
       }
 
-      console.log("Date ranges:", {
-        currentMonthStart: currentMonthStart.format('YYYY-MM-DD'),
-        currentMonthEnd: currentMonthEnd.format('YYYY-MM-DD'),
-        prevMonthStart: prevMonthStart.format('YYYY-MM-DD'),
-        prevMonthEnd: prevMonthEnd.format('YYYY-MM-DD')
-      });
+      // console.log("Date ranges:", {
+      //   currentMonthStart: currentMonthStart.format('YYYY-MM-DD'),
+      //   currentMonthEnd: currentMonthEnd.format('YYYY-MM-DD'),
+      //   prevMonthStart: prevMonthStart.format('YYYY-MM-DD'),
+      //   prevMonthEnd: prevMonthEnd.format('YYYY-MM-DD')
+      // });
 
       // Build base query with proper ObjectId conversion
       const mongoose = require('mongoose');
@@ -72,7 +72,7 @@ class DoctorAnalyticsController {
         baseQuery.location = location;
       }
 
-      console.log("Base query:", JSON.stringify(baseQuery, null, 2));
+      // console.log("Base query:", JSON.stringify(baseQuery, null, 2));
 
       // Get summary statistics
       const summaryStats = await this.getSummaryStats(
@@ -122,12 +122,12 @@ class DoctorAnalyticsController {
   // Get summary statistics for doctors
   async getSummaryStats(baseQuery, currentStart, currentEnd, previousStart, previousEnd) {
     try {
-      console.log("Summary stats date ranges:", {
-        currentStart: currentStart.format('YYYY-MM-DD'),
-        currentEnd: currentEnd.format('YYYY-MM-DD'),
-        previousStart: previousStart.format('YYYY-MM-DD'),
-        previousEnd: previousEnd.format('YYYY-MM-DD')
-      });
+      // console.log("Summary stats date ranges:", {
+      //   currentStart: currentStart.format('YYYY-MM-DD'),
+      //   currentEnd: currentEnd.format('YYYY-MM-DD'),
+      //   previousStart: previousStart.format('YYYY-MM-DD'),
+      //   previousEnd: previousEnd.format('YYYY-MM-DD')
+      // });
 
       // Current month appointments
       const currentAppointments = await Appointment.countDocuments({
@@ -195,7 +195,7 @@ class DoctorAnalyticsController {
         monthName: monthName
       });
 
-      console.log("Base query for aggregation:", JSON.stringify(baseQuery, null, 2));
+      // console.log("Base query for aggregation:", JSON.stringify(baseQuery, null, 2));
 
       // First, let's check if there are any appointments in the date range
       const totalAppointments = await Appointment.countDocuments({
@@ -222,7 +222,7 @@ class DoctorAnalyticsController {
         { $sort: { '_id': 1 } }
       ]);
 
-      console.log("Appointments aggregation result:", appointmentsData);
+      // console.log("Appointments aggregation result:", appointmentsData);
 
       // Get unique doctors by day
       const doctorsData = await Appointment.aggregate([
@@ -249,7 +249,7 @@ class DoctorAnalyticsController {
         { $sort: { '_id': 1 } }
       ]);
 
-      console.log("Doctors aggregation result:", doctorsData);
+      // console.log("Doctors aggregation result:", doctorsData);
 
       // Get unique patients by day
       const patientsData = await Appointment.aggregate([
@@ -276,7 +276,7 @@ class DoctorAnalyticsController {
         { $sort: { '_id': 1 } }
       ]);
 
-      console.log("Patients aggregation result:", patientsData);
+      // console.log("Patients aggregation result:", patientsData);
 
       // Fix: Better formatting for daily data
       const formatDailyData = (data, type) => {

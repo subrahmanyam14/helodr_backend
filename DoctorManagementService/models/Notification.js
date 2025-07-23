@@ -17,6 +17,7 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
+        enum: ["appoinment_scheduled", "appointment_confirmation", "appointment_cancelation", "appointment_reminder_1-day", "appointment_reminder_1-hour", "appointment_reminder_30-min", "appointment_reminder_10-min", "appointment_reschedule", "payment_confirmation", "refund_initiate"]
     },
     status: {
         type: String,
