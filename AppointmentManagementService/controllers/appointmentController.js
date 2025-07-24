@@ -651,7 +651,8 @@ exports.getAppointment = async (req, res) => {
         }
       })
       .populate('patient', 'fullName profilePhoto')
-      .populate('payment');
+      .populate('payment')
+      .select('-reminders');
 
     if (!appointment) {
       return res.status(404).json({ success: false, message: 'Appointment not found' });
@@ -1602,7 +1603,7 @@ exports.getDoctorDashboardStats = async (req, res) => {
   }
 };
 
-exports.rescheduleAppoinment = async (req, res) => {
+exports.rescheduleAppointment = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
