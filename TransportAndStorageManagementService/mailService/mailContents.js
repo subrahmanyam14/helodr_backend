@@ -617,8 +617,7 @@ const createOtpHtml = (fullName, email, otpCode, generatedTime, expiryTime) => {
     `
 }
 
-
-const createAppoinmentConfirmationHTML = (patientName, doctorName, specialization, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem, meetingLink) => {
+const createOnlineAppoinmentConfirmationHTML = (patientName, doctorName, specialization, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem, meetingLink) => {
 	return `
 
 	<!DOCTYPE html>
@@ -880,7 +879,226 @@ const createAppoinmentConfirmationHTML = (patientName, doctorName, specializatio
 	`
 }
 
-const createDoctorAppointmentConfirmationHTML = (doctorName, patientName, patientAge, patientGender, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem, meetingLink) => {
+const createOfflineAppointmentConfirmationHTML = (patientName, doctorName, specialization, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem, clinicAddress) => {
+  return `
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Appointment Confirmation - HeloDr</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafa; color: #333333; line-height: 1.6;">
+  <table cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-spacing: 0; border-collapse: collapse; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); border-radius: 12px; overflow: hidden;">
+    <!-- Header with white background and logo -->
+    <tr>
+      <td style="padding: 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #ffffff; padding: 24px 0; text-align: center; border-spacing: 0; border-collapse: collapse; border-bottom: 1px solid #f0f0f0;">
+          <tr>
+            <td>
+              <table align="center" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 0;">
+                    <img src="https://res.cloudinary.com/dnl1wajhw/image/upload/v1744544139/logo_dghuww.png" alt="HeloDr Logo" style="width: 70px; height: auto; display: block;">
+                  </td>
+                  <td style="padding: 0 0 0 15px;">
+                    <span style="font-size: 26px; font-weight: 700; color: #009490; display: inline-block; letter-spacing: -0.5px;">HeloDr</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- Colored bar separator -->
+    <tr>
+      <td style="padding: 0; height: 4px; background: linear-gradient(to right, #009490, #00b8b3);"></td>
+    </tr>
+
+    <!-- Content -->
+    <tr>
+      <td style="padding: 40px 30px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+          <tr>
+            <td>
+              <h1 style="margin: 0 0 24px; font-size: 24px; font-weight: 700; color: #009490; text-align: center;">
+                Your In-Person Appointment is Confirmed
+              </h1>
+              <p style="margin: 0 0 25px; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                Dear <strong>${patientName}</strong>,
+              </p>
+              <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                Your in-person appointment has been successfully scheduled. Here are your appointment details:
+              </p>
+
+              <!-- Doctor Info Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 30px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-user-md" style="margin-right: 8px;"></i>Doctor Information
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">
+                          Doctor Name:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">Dr. ${doctorName}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666666; vertical-align: top;">Specialization:
+                        </td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${specialization}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Appointment Details Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 30px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-calendar-check" style="margin-right: 8px;"></i>Appointment Details
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">Date & Time:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate} at ${appointmentStartTime}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666666; vertical-align: top;">Duration:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">Until ${appointmentEndTime}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666666; vertical-align: top;">Visit Type:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">In-person consultation</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Clinic Address Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 30px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-map-marker-alt" style="margin-right: 8px;"></i>Clinic Address
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #555555;">
+                      ${clinicAddress}
+                    </p>
+                    <p style="margin: 15px 0 0; font-size: 15px; line-height: 1.6; color: #555555;">
+                      <a href="https://maps.google.com/?q=${encodeURIComponent(clinicAddress)}" style="color: #009490; text-decoration: none; font-weight: 500;">
+                        <i class="fas fa-directions" style="margin-right: 5px;"></i>Get Directions
+                      </a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Your Problem Summary -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 30px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-notes-medical" style="margin-right: 8px;"></i>Your Concern
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #555555;">
+                      ${patientProblem}
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Reminders Section -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 10px 0 0; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-bell" style="margin-right: 8px;"></i>Important Reminders
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <ul style="margin: 0; padding: 0 0 0 20px; font-size: 15px; line-height: 1.6; color: #555555;">
+                      <li style="margin-bottom: 10px; padding-left: 5px;">Please arrive at the clinic 10-15 minutes before your scheduled time.</li>
+                      <li style="margin-bottom: 10px; padding-left: 5px;">Bring your ID and any relevant medical records or reports.</li>
+                      <li style="margin-bottom: 10px; padding-left: 5px;">Carry your health insurance card if applicable.</li>
+                      <li style="margin-bottom: 0; padding-left: 5px;">If you need to reschedule, please do so at least 6 hours in advance.</li>
+                    </ul>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 30px 0 0; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                You can view and manage all your appointments in your HeloDr account.
+              </p>
+              <p style="margin: 15px 0 0; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                Thank you for choosing HeloDr for your healthcare needs.
+              </p>
+              <p style="margin: 15px 0 0; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                Best regards,<br>
+                The HeloDr Team
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- Footer -->
+    <tr>
+      <td style="padding: 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f9f9; padding: 0; text-align: center; border-spacing: 0; border-collapse: collapse; border-top: 1px solid #eaeaea;">
+          <tr>
+            <td style="padding: 20px 0;">
+              <img src="https://res.cloudinary.com/dnl1wajhw/image/upload/v1744544139/logo_dghuww.png" alt="HeloDr" style="width: 40px; height: auto; display: block; margin: 0 auto 12px;">
+              <p style="margin: 0 0 15px; font-size: 14px; color: #666666;">
+                Need help? Contact our support team at
+                <a href="mailto:support@helodr.com" style="color: #009490; text-decoration: none; font-weight: 500;">support@helodr.com</a>
+              </p>
+              <p style="margin: 0; font-size: 12px; color: #888888;">
+                &copy; 2023 HeloDr. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+
+</html>
+  `;
+}
+
+const createDoctorOnlineAppointmentConfirmationHTML = (doctorName, patientName, patientAge, patientGender, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem, meetingLink) => {
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -1085,4 +1303,191 @@ const createDoctorAppointmentConfirmationHTML = (doctorName, patientName, patien
   `;
 };
 
-module.exports = {createEmailVerificationHTML, createReviewEmailHTML, createOtpHtml, createAppoinmentConfirmationHTML, createDoctorAppointmentConfirmationHTML}
+
+const createDoctorOfflineAppointmentConfirmationHTML = (doctorName, patientName, patientAge, patientGender, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem) => {
+  return `
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Appointment - HeloDr</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafa; color: #333333; line-height: 1.6;">
+  <table cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-spacing: 0; border-collapse: collapse; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); border-radius: 12px; overflow: hidden;">
+    <!-- Header -->
+    <tr>
+      <td style="padding: 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #ffffff; padding: 24px 0; text-align: center; border-spacing: 0; border-collapse: collapse; border-bottom: 1px solid #f0f0f0;">
+          <tr>
+            <td>
+              <table align="center" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 0;">
+                    <img src="https://res.cloudinary.com/dnl1wajhw/image/upload/v1744544139/logo_dghuww.png" alt="HeloDr Logo" style="width: 70px; height: auto; display: block;">
+                  </td>
+                  <td style="padding: 0 0 0 15px;">
+                    <span style="font-size: 26px; font-weight: 700; color: #009490; display: inline-block; letter-spacing: -0.5px;">HeloDr</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- Colored bar separator -->
+    <tr>
+      <td style="padding: 0; height: 4px; background: linear-gradient(to right, #009490, #00b8b3);"></td>
+    </tr>
+
+    <!-- Content -->
+    <tr>
+      <td style="padding: 40px 30px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+          <tr>
+            <td>
+              <h1 style="margin: 0 0 24px; font-size: 24px; font-weight: 700; color: #009490; text-align: center;">
+                New In-Person Appointment Scheduled
+              </h1>
+              <p style="margin: 0 0 25px; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                Dear Dr. <strong>${doctorName}</strong>,
+              </p>
+              <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                A new in-person appointment has been booked with you. Here are the details:
+              </p>
+
+              <!-- Patient Info Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 30px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-user-injured" style="margin-right: 8px;"></i>Patient Information
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">Name:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${patientName}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666666; vertical-align: top;">Age & Gender:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${patientAge} years, ${patientGender}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Appointment Details Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 30px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-calendar-check" style="margin-right: 8px;"></i>Appointment Details
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">Date & Time:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate} at ${appointmentStartTime}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666666; vertical-align: top;">Duration:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">Until ${appointmentEndTime}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666666; vertical-align: top;">Visit Type:</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">In-person consultation</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Patient's Concern -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 30px; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-notes-medical" style="margin-right: 8px;"></i>Patient's Concern
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #555555;">
+                      ${patientProblem}
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Reminders Section -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 10px 0 0; border: 1px solid #eaeaea; border-radius: 10px; overflow: hidden; border-spacing: 0; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);">
+                <tr>
+                  <td style="padding: 16px; background-color: #f5fafa; border-bottom: 1px solid #eaeaea;">
+                    <p style="margin: 0; font-size: 17px; font-weight: 600; color: #009490;">
+                      <i class="fas fa-bell" style="margin-right: 8px;"></i>Reminders
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 20px;">
+                    <ul style="margin: 0; padding: 0 0 0 20px; font-size: 15px; line-height: 1.6; color: #555555;">
+                      <li style="margin-bottom: 10px; padding-left: 5px;">Please be available at your clinic at the scheduled time.</li>
+                      <li style="margin-bottom: 10px; padding-left: 5px;">Review the patient's concern beforehand.</li>
+                      <li style="margin-bottom: 0; padding-left: 5px;">If unavailable, reschedule/cancel via your HeloDr dashboard.</li>
+                    </ul>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 30px 0 0; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                Manage appointments in your <a href="#" style="color: #009490; text-decoration: none; font-weight: 500;">HeloDr dashboard</a>.
+              </p>
+              <p style="margin: 15px 0 0; font-size: 16px; line-height: 1.6; color: #555555; text-align: left;">
+                Best regards,<br>
+                The HeloDr Team
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+    <!-- Footer -->
+    <tr>
+      <td style="padding: 0;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f9f9; padding: 0; text-align: center; border-spacing: 0; border-collapse: collapse; border-top: 1px solid #eaeaea;">
+          <tr>
+            <td style="padding: 20px 0;">
+              <img src="https://res.cloudinary.com/dnl1wajhw/image/upload/v1744544139/logo_dghuww.png" alt="HeloDr" style="width: 40px; height: auto; display: block; margin: 0 auto 12px;">
+              <p style="margin: 0 0 15px; font-size: 14px; color: #666666;">
+                Questions? Contact <a href="mailto:support@helodr.com" style="color: #009490; text-decoration: none; font-weight: 500;">support@helodr.com</a>
+              </p>
+              <p style="margin: 0; font-size: 12px; color: #888888;">
+                &copy; 2023 HeloDr. All rights reserved.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+
+</html>
+  `;
+};
+module.exports = {createEmailVerificationHTML, createReviewEmailHTML, createOtpHtml, createOnlineAppoinmentConfirmationHTML, createOfflineAppointmentConfirmationHTML, createDoctorOnlineAppointmentConfirmationHTML, createDoctorOfflineAppointmentConfirmationHTML}

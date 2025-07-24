@@ -32,6 +32,8 @@ router.post("/appointments/:appointmentId/complete", protect, completeAppointmen
 //
 router.post("/refund/:paymentId", protect, refundPayment);
 
+router.post("/cancelAppointment", protect, cancelAppointment);
+
 // Payment details and history
 router.get("/:paymentId", protect, getPaymentDetails);
 router.get("/user/:userId/:userType", protect, getUserPayments);

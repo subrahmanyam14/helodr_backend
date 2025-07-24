@@ -6,6 +6,7 @@ const Transaction = require("../models/Transaction");
 const Notification = require("../models/Notification");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 const Appointment = require("../models/Appointment");
+const RefundService = require("../services/refundService")
 const Wallet = require("../models/Wallet");
 
 require("dotenv").config();
@@ -244,7 +245,7 @@ const createDummyPayment = async (req, res) => {
         referenceId: appointmentId,
         user: patientId,
         message: "Appointment confirmed",
-        type: "appoinment_confirmation"
+        type: "appointment_confirmation"
       }),
       new Notification({
         referenceId: appointmentId,
@@ -785,8 +786,7 @@ const refundPayment = async (req, res) => {
  * Controller to handle appointment cancellation by patient
  */
 const cancelAppointment = async (req, res) => {
-  const { appointmentId } = req.params;
-  const { reason } = req.body;
+  const { reason, appointmentId } = req.body;
 
   try {
     // Assuming req.user contains the logged-in user's details

@@ -86,23 +86,22 @@ const handleConfirmedAppointment = async (appointment) => {
 /**
  * Create and update Google Meet link for an appointment
  */
-const createAndUpdateMeetLink = async (appointment) => {
+const createAndUpdateMeetLink = async (appointment, doctor) => {
   try {
-    const meetLink = await createGoogleMeetLink(appointment);
 
-    if (meetLink) {
+    if (doctor.meetLink) {
       // Update the appointment with the Google Meet link
       await Appointment.findByIdAndUpdate(appointment._id, {
-        $set: { videoConferenceLink: meetLink }
+        $set: { videoConferenceLink: doctor.meetLink }
       });
 
-      console.log(`Updated appointment ${appointment._id} with Google Meet link: ${meetLink}`);
+      console.log(`Updated appointment ${appointment._id} with Google Meet link: ${doctor.meetLink}`);
 
       // Update our local copy of the appointment
-      appointment.videoConferenceLink = meetLink;
+      appointment.videoConferenceLink = doctor.meetLink;
     }
   } catch (error) {
-    console.error(`Error creating/updating Google Meet link for appointment ${appointment._id}:`, error);
+    console.error(`Error updating Google Meet link for appointment ${appointment._id}:`, error);
   }
 };
 
@@ -347,13 +346,12 @@ const initAppointmentNotificationService = async () => {
     // For video appointments without a Google Meet link, create and update links
     for (const appointment of futureAppointments) {
       if (appointment.appointmentType === "video" && !appointment.videoConferenceLink) {
-        // console.log("Appointmentss", appointment);
         appointment.doctor = await User.findById(appointment.doctor.user);
-        await createAndUpdateMeetLink(appointment);
+        await createAndUpdateMeetLink(appointment, appointment.doctor);
       }
 
       // Schedule reminders for each future appointment
-      scheduleReminders(appointment);
+      // scheduleReminders(appointment);
     }
 
     console.log("🔔 Appointment notification service initialized successfully!");
