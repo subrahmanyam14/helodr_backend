@@ -17,12 +17,38 @@ const notificationSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ["appoinment_scheduled", "appointment_confirmation", "appointment_cancelation", "appointment_reminder_1-day", "appointment_reminder_1-hour", "appointment_reminder_30-min", "appointment_reminder_10-min", "appointment_reschedule", "payment_confirmation", "refund_initiate"]
+        enum: [
+            "appointment_scheduled", 
+            "appointment_confirmation", 
+            "appointment_cancelation", 
+            "appointment_reminder_1-day", 
+            "appointment_reminder_1-hour", 
+            "appointment_reminder_30-min", 
+            "appointment_reminder_10-min", 
+            "appointment_reschedule", 
+            "payment_confirmation", 
+            "refund_initiate"
+        ],
+        required: true
     },
     status: {
         type: String,
-        enum: ["pending", "sent", "failed", "cancelled"],
+        enum: ["pending", "scheduled", "sent", "failed", "cancelled"],
         default: "pending"
+    },
+    scheduledFor: {
+        type: Date,
+        // This field is required when status is "scheduled"
+        validate: {
+            validator: function(v) {
+                // If status is "scheduled", scheduledFor must be provided
+                if (this.status === "scheduled") {
+                    return v != null;
+                }
+                return true;
+            },
+            message: "scheduledFor is required when status is 'scheduled'"
+        }
     },
     sentAt: {
         type: Date
@@ -31,10 +57,19 @@ const notificationSchema = new mongoose.Schema({
         type: String
     }
 },
-    {
-        timestamps: true
-    });
+{
+    timestamps: true
+});
+
+// Index for efficient querying of scheduled notifications
+notificationSchema.index({ status: 1, scheduledFor: 1 });
+
+// Index for efficient querying by user and type
+notificationSchema.index({ user: 1, type: 1 });
+
+// Index for efficient querying by reference (appointment)
+notificationSchema.index({ referenceId: 1 });
 
 const Notification = mongoose.model("Notification", notificationSchema);
 
-module.exports = Notification
+module.exports = Notification;

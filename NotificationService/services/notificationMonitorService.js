@@ -1,9 +1,8 @@
 // notificationMonitorService.js
-const mongoose = require("mongoose");
 const Notification = require("../models/Notification");
-const User = require("../models/User");
 const axios = require("axios");
 const Appointment = require("../models/Appointment");
+const Hospital = require("../models/Hospital");
 require("dotenv").config();
 
 // Initialize processed notifications set to prevent duplicate processing
@@ -30,11 +29,16 @@ const startNotificationWatcher = () => {
 
         if (!notification) return;
 
-        // Mark as processed to prevent duplicate handling
-        processedNotifications.add(notificationId.toString());
+        // Only process notifications that are pending or scheduled for now/past
+        if (notification.status === "pending" ||
+          (notification.status === "scheduled" && notification.scheduledFor && new Date(notification.scheduledFor) <= new Date())) {
 
-        // Send the notification
-        await sendNotification(notification);
+          // Mark as processed to prevent duplicate handling
+          processedNotifications.add(notificationId.toString());
+
+          // Send the notification
+          await sendNotification(notification);
+        }
       }
     } catch (error) {
       console.error("Error in notification change stream:", error);
@@ -42,6 +46,28 @@ const startNotificationWatcher = () => {
   });
 
   console.log("👀 Notification watcher started - monitoring for new notifications...");
+};
+
+/**
+ * Process scheduled notifications that are due
+ */
+const processScheduledNotifications = async () => {
+  try {
+    const now = new Date();
+    const dueNotifications = await Notification.find({
+      status: "scheduled",
+      scheduledFor: { $lte: now }
+    }).populate("user");
+
+    for (const notification of dueNotifications) {
+      if (!processedNotifications.has(notification._id.toString())) {
+        processedNotifications.add(notification._id.toString());
+        await sendNotification(notification);
+      }
+    }
+  } catch (error) {
+    console.error("Error processing scheduled notifications:", error);
+  }
 };
 
 /**
@@ -53,10 +79,10 @@ const sendNotification = async (notification) => {
       console.error(`User not found for notification ${notification._id}`);
       return;
     }
-    
+
     // Get user communication preferences
     const user = notification.user;
-    const notificationType = notification.type; // Fixed: was using undefined variable
+    const notificationType = notification.type;
 
     // Prepare notification content
     const notificationSubject = getNotificationSubject(notification.type);
@@ -78,11 +104,6 @@ const sendNotification = async (notification) => {
       case "appointment_scheduled":
         if (user.isEmailVerified && user.email) {
           const appointmentData = await Appointment.findById(notification.referenceId).populate("patient").populate("doctor");
-          if(appointmentData.type === "video")
-          {
-            appointmentData.videoConferenceLink = appointmentData.doctor.meetingLink;
-            await appointmentData.save();
-          }
           await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/mail/sendAppointmentScheduled`, {
             email: user.email,
             sub: notificationSubject,
@@ -105,14 +126,14 @@ const sendNotification = async (notification) => {
           const appointmentData = await Appointment.findById(notification.referenceId)
             .populate("doctor")
             .populate({
-              path: "doctor.hospitalAffiliations.hospital",
-              model: "Hospital"
+              path: "doctor",
+              populate: {
+                path: "hospitalAffiliations.hospital",
+                model: "Hospital"
+              }
             });
-            if(appointmentData.type === "video"){
-              appointmentData.videoConferenceLink = doctor.meetingLink;
-              await appointmentData.save();
-            }
-            console.log("logging data: ", appointmentData);
+
+          // console.log("logging data: ", appointmentData.doctor.hospitalAffiliations[0].hospital);
           let clinicAddress = "";
           if (appointmentData.doctor.hospitalAffiliations && appointmentData.doctor.hospitalAffiliations.length > 0) {
             const hospital = appointmentData.doctor.hospitalAffiliations[0].hospital;
@@ -145,22 +166,13 @@ const sendNotification = async (notification) => {
           await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/mail/sendAppointmentReschedule`, emailPayload);
           console.log(`Email notification (${notificationType}) sent to ${user.email}`);
         }
-        // if (user.isMobileVerified && user.mobileNumber) {
-        //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentReschedule`, smsPayload);
-        //   console.log(`SMS notification (${notificationType}) sent to ${user.mobileNumber}`);
-        // }
         break;
-
 
       case "appointment_cancelation":
         if (user.isEmailVerified && user.email) {
           await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/mail/sendAppointmentCancellation`, emailPayload);
           console.log(`Email notification (cancellation) sent to ${user.email}`);
         }
-        // if (user.isMobileVerified && user.mobileNumber) {
-        //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentCancellation`, smsPayload);
-        //   console.log(`SMS notification (cancellation) sent to ${user.mobileNumber}`);
-        // }
         break;
 
       case "appointment_reminder_1-day":
@@ -174,13 +186,6 @@ const sendNotification = async (notification) => {
           });
           console.log(`Email reminder (${notificationType}) sent to ${user.email}`);
         }
-        // if (user.isMobileVerified && user.mobileNumber) {
-        //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendAppointmentReminder`, {
-        //     ...smsPayload,
-        //     reminderType: notificationType.split('_').pop()
-        //   });
-        //   console.log(`SMS reminder (${notificationType}) sent to ${user.mobileNumber}`);
-        // }
         break;
 
       case "payment_confirmation":
@@ -188,10 +193,6 @@ const sendNotification = async (notification) => {
           await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/mail/sendPaymentConfirmation`, emailPayload);
           console.log(`Payment confirmation email sent to ${user.email}`);
         }
-        // if (user.isMobileVerified && user.mobileNumber) {
-        //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendPaymentConfirmation`, smsPayload);
-        //   console.log(`Payment confirmation SMS sent to ${user.mobileNumber}`);
-        // }
         break;
 
       case "refund_initiate":
@@ -199,10 +200,6 @@ const sendNotification = async (notification) => {
           await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/mail/sendRefundInitiation`, emailPayload);
           console.log(`Refund initiation email sent to ${user.email}`);
         }
-        // if (user.isMobileVerified && user.mobileNumber) {
-        //   await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendRefundInitiation`, smsPayload);
-        //   console.log(`Refund initiation SMS sent to ${user.mobileNumber}`);
-        // }
         break;
 
       default:
@@ -265,25 +262,89 @@ const getNotificationSubject = (type) => {
 /**
  * Initialize the notification monitor service
  */
+/**
+ * Initialize the notification monitor service with enhanced processing
+ */
 const initNotificationMonitorService = async () => {
   try {
     // Start the watcher for new notifications
     startNotificationWatcher();
 
-    // Process any unsent notifications - FIXED: Removed .populate("doctor")
-    const unsentNotifications = await Notification.find({
-      status: { $ne: "sent" }
-    }).populate("user");
+    // Process any unsent notifications with retry logic
+    await processUnsentNotifications();
 
-    console.log(`Processing ${unsentNotifications.length} unsent notifications...`);
+    // Set up periodic check for scheduled notifications (every minute)
+    setInterval(processScheduledNotifications, 60000);
 
-    for (const notification of unsentNotifications) {
-      await sendNotification(notification);
-    }
+    // Set up periodic check for any stuck pending notifications (every 5 minutes)
+    setInterval(processStuckNotifications, 5 * 60000);
 
     console.log("🔔 Notification monitor service initialized successfully!");
   } catch (error) {
     console.error("Failed to initialize notification monitor service:", error);
+  }
+};
+
+/**
+ * Process unsent notifications with better error handling
+ */
+const processUnsentNotifications = async () => {
+  try {
+    const unsentNotifications = await Notification.find({
+      $or: [
+        { status: "pending" },
+        {
+          status: "scheduled",
+          scheduledFor: { $lte: new Date() }
+        }
+      ]
+    }).populate("user");
+
+    console.log(`📮 Processing ${unsentNotifications.length} unsent notifications...`);
+
+    for (const notification of unsentNotifications) {
+      if (!processedNotifications.has(notification._id.toString())) {
+        console.log(`Processing unsent notification: ${notification._id} (${notification.type})`);
+        processedNotifications.add(notification._id.toString());
+        await sendNotification(notification);
+
+        // Add small delay between notifications to avoid overwhelming the email service
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    console.log(`✅ Completed processing unsent notifications`);
+  } catch (error) {
+    console.error("Error processing unsent notifications:", error);
+  }
+};
+
+/**
+ * Process notifications that might be stuck in pending status
+ */
+const processStuckNotifications = async () => {
+  try {
+    // Find notifications that have been pending for more than 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+    const stuckNotifications = await Notification.find({
+      status: "pending",
+      createdAt: { $lt: fiveMinutesAgo }
+    }).populate("user");
+
+    if (stuckNotifications.length > 0) {
+      console.log(`🔧 Found ${stuckNotifications.length} stuck notifications, processing...`);
+
+      for (const notification of stuckNotifications) {
+        if (!processedNotifications.has(notification._id.toString())) {
+          console.log(`Processing stuck notification: ${notification._id}`);
+          processedNotifications.add(notification._id.toString());
+          await sendNotification(notification);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error processing stuck notifications:", error);
   }
 };
 

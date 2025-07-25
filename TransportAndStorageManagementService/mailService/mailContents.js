@@ -729,7 +729,7 @@ const createOnlineAppoinmentConfirmationHTML = (patientName, doctorName, special
 											<tr>
 												<td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">Date
 													& Time:</td>
-												<td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate} at
+												<td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate.split('T')[0]} at
 													${appointmentStartTime}</td>
 											</tr>
 											<tr>
@@ -979,7 +979,7 @@ const createOfflineAppointmentConfirmationHTML = (patientName, doctorName, speci
                     <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
                       <tr>
                         <td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">Date & Time:</td>
-                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate} at ${appointmentStartTime}</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate.split('T')[0]} at ${appointmentStartTime}</td>
                       </tr>
                       <tr>
                         <td style="padding: 8px 0; color: #666666; vertical-align: top;">Duration:</td>
@@ -1194,7 +1194,7 @@ const createDoctorOnlineAppointmentConfirmationHTML = (doctorName, patientName, 
                     <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
                       <tr>
                         <td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">Date & Time:</td>
-                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate} at ${appointmentStartTime}</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate.split('T')[0]} at ${appointmentStartTime}</td>
                       </tr>
                       <tr>
                         <td style="padding: 8px 0; color: #666666; vertical-align: top;">Duration:</td>
@@ -1303,7 +1303,6 @@ const createDoctorOnlineAppointmentConfirmationHTML = (doctorName, patientName, 
   `;
 };
 
-
 const createDoctorOfflineAppointmentConfirmationHTML = (doctorName, patientName, patientAge, patientGender, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem) => {
   return `
 <!DOCTYPE html>
@@ -1400,7 +1399,7 @@ const createDoctorOfflineAppointmentConfirmationHTML = (doctorName, patientName,
                     <table width="100%" cellpadding="0" cellspacing="0" style="border-spacing: 0; border-collapse: collapse;">
                       <tr>
                         <td style="padding: 8px 0; width: 140px; color: #666666; vertical-align: top;">Date & Time:</td>
-                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate} at ${appointmentStartTime}</td>
+                        <td style="padding: 8px 0; font-weight: 600; color: #333333;">${appointmentDate.split('T')[0]} at ${appointmentStartTime}</td>
                       </tr>
                       <tr>
                         <td style="padding: 8px 0; color: #666666; vertical-align: top;">Duration:</td>

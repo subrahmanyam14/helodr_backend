@@ -155,26 +155,10 @@ const verifyRazorpayPayment = async (req, res) => {
     // Use the createPayment method which now handles upcoming earnings
     const paymentDoc = await Payment.createPayment(paymentData, appointment.date);
 
-    // Create notifications
-    const notificationDocs = [
-      new Notification({
-        referenceId: appointmentId,
-        user: patientId,
-        message: "Appointment confirmed",
-        type: "appoinment_confirmation"
-      }),
-      new Notification({
-        referenceId: appointmentId,
-        user: appointment.doctor.user,
-        message: "New appointment scheduled",
-        type: "appoinment_scheduled"
-      })
-    ];
-
-    await Notification.insertMany(notificationDocs, { session });
 
     // Update appointment status
     appointment.status = "confirmed";
+    appointment.videoConferenceLink = appointment.appointmentType === 'video'? appointment.doctor.meetingLink: ""
     appointment.payment = paymentDoc._id;
     await appointment.save({ session });
 
@@ -218,9 +202,8 @@ const createDummyPayment = async (req, res) => {
     const totalAmount = baseAmount + gstAmount;
 
     const appointment = await Appointment.findById(appointmentId).populate("doctor");
-    if(!appointment)
-    {
-      return res.status(404).send({error: "Appointment not found"});
+    if (!appointment) {
+      return res.status(404).send({ error: "Appointment not found" });
     }
     // Use the static method to create the payment and handle all related logic
     const payment = await Payment.createPayment({
@@ -239,28 +222,15 @@ const createDummyPayment = async (req, res) => {
       }
     }, new Date()); // Optionally use the appointment date here
 
-    // Create notifications for both patient and doctor
-    const notificationDocs = [
-      new Notification({
-        referenceId: appointmentId,
-        user: patientId,
-        message: "Appointment confirmed",
-        type: "appointment_confirmation"
-      }),
-      new Notification({
-        referenceId: appointmentId,
-        user: appointment.doctor.user,
-        message: "New appointment scheduled",
-        type: "appoinment_scheduled"
-      })
-    ];
-
-    await Notification.insertMany(notificationDocs);
-
+    console.log("doctor details: , ", appointment.doctor);
     // Update the appointment status
     await Appointment.findByIdAndUpdate(
       appointmentId,
-      { status: "confirmed" },
+      {
+        status: "confirmed",
+        payment: payment._id,
+        videoConferenceLink: appointment.appointmentType === 'video'? appointment.doctor.meetingLink: ""
+      },
       { new: true, runValidators: true }
     );
 

@@ -3,16 +3,12 @@ const mongoose = require("mongoose");
 const Appointment = require("../models/Appointment");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
-const axios = require("axios");
-const { createGoogleMeetLink } = require("./googleMeetService");
-const schedule = require("node-schedule");
 require("dotenv").config();
 
 // Initialize notification tracking to prevent duplicates
 const notificationsSent = new Map();
 
 /**
- * 
  * Start watching the appointment collection for changes
  */
 const startAppointmentWatcher = () => {
@@ -24,7 +20,7 @@ const startAppointmentWatcher = () => {
         (change.operationType === "update" &&
           change.updateDescription.updatedFields.status === "confirmed")) {
 
-        console.log("appointment found", change.documentKey._id);
+        console.log("Appointment change detected:", change.documentKey._id);
         const appointmentId = change.documentKey._id;
         const appointment = await Appointment.findById(appointmentId)
           .populate("patient")
@@ -50,216 +46,175 @@ const startAppointmentWatcher = () => {
  */
 const handleConfirmedAppointment = async (appointment) => {
   try {
-    // For video appointments, create Google Meet link if not already present
-    if (appointment.appointmentType === "video" && !appointment.videoConferenceLink) {
-      await createAndUpdateMeetLink(appointment);
+    // Check if notifications already exist for this appointment
+    const existingNotifications = await Notification.find({
+      referenceId: appointment._id,
+      type: { $in: ["appointment_confirmation", "appointment_scheduled"] }
+    });
+
+    // Only create notifications if they don't already exist
+    if (existingNotifications.length === 0) {
+      // Create and send confirmation notifications immediately
+      await createNotification(
+        appointment._id,
+        appointment.patient._id,
+        `Your appointment on ${formatDate(appointment.date)} at ${appointment.slot.startTime} has been confirmed.${appointment.videoConferenceLink
+          ? ` Join the video call: ${appointment.videoConferenceLink}`
+          : ''
+        }`,
+        "appointment_confirmation"
+      );
+
+      await createNotification(
+        appointment._id,
+        appointment.doctor.user,
+        `New appointment scheduled on ${formatDate(appointment.date)} at ${appointment.slot.startTime}.${appointment.videoConferenceLink
+          ? ` Join the video call: ${appointment.videoConferenceLink}`
+          : ''
+        }`,
+        "appointment_scheduled"
+      );
     }
 
-    // Create and send confirmation notifications
-    await createNotification(
-      appointment._id,
-      appointment.patient._id,
-      `Your appointment on ${formatDate(appointment.date)} at ${appointment.slot.startTime} has been confirmed.${appointment.videoConferenceLink
-        ? ` Join the video call: ${appointment.videoConferenceLink}`
-        : ''
-      }`,
-      "appointment_confirmation"
-    );
-
-    await createNotification(
-      appointment._id,
-      appointment.doctor._id,
-      `New appointment confirmed on ${formatDate(appointment.date)} at ${appointment.slot.startTime}.${appointment.videoConferenceLink
-        ? ` Join the video call: ${appointment.videoConferenceLink}`
-        : ''
-      }`,
-      "appointment_confirmation"
-    );
-
-    // Schedule reminder notifications
-    scheduleReminders(appointment);
+    // Schedule reminder notifications by creating notification records
+    await scheduleReminderNotifications(appointment);
   } catch (error) {
     console.error("Error handling confirmed appointment:", error);
   }
 };
 
 /**
- * Create and update Google Meet link for an appointment
+ * Create scheduled reminder notifications in the database
  */
-const createAndUpdateMeetLink = async (appointment, doctor) => {
-  try {
-
-    if (doctor.meetLink) {
-      // Update the appointment with the Google Meet link
-      await Appointment.findByIdAndUpdate(appointment._id, {
-        $set: { videoConferenceLink: doctor.meetLink }
-      });
-
-      console.log(`Updated appointment ${appointment._id} with Google Meet link: ${doctor.meetLink}`);
-
-      // Update our local copy of the appointment
-      appointment.videoConferenceLink = doctor.meetLink;
-    }
-  } catch (error) {
-    console.error(`Error updating Google Meet link for appointment ${appointment._id}:`, error);
-  }
-};
-
-/**
- * Schedule reminder notifications for the appointment
- */
-const scheduleReminders = (appointment) => {
+const scheduleReminderNotifications = async (appointment) => {
   const appointmentDate = new Date(appointment.date);
   const [hours, minutes] = appointment.slot.startTime.split(":");
   appointmentDate.setHours(hours, minutes, 0, 0);
 
-  // Get date for 1 day before appointment
+  // Calculate reminder times
   const oneDayBefore = new Date(appointmentDate);
   oneDayBefore.setDate(oneDayBefore.getDate() - 1);
 
-  // Get date for 1 hour before appointment
   const oneHourBefore = new Date(appointmentDate);
   oneHourBefore.setHours(oneHourBefore.getHours() - 1);
 
-  // Get date for 30 minutes before appointment
   const thirtyMinBefore = new Date(appointmentDate);
   thirtyMinBefore.setMinutes(thirtyMinBefore.getMinutes() - 30);
 
-  // Get date for 10 minutes before appointment
   const tenMinBefore = new Date(appointmentDate);
   tenMinBefore.setMinutes(tenMinBefore.getMinutes() - 10);
 
-  // Only schedule if the dates are in the future
   const now = new Date();
 
-  // Schedule 1-day reminder (email)
-  if (oneDayBefore > now) {
-    schedule.scheduleJob(oneDayBefore, async () => {
-      await sendReminderNotification(appointment, "1-day");
+  // Create notification records for future reminders
+  const reminderNotifications = [];
+  const reminderTypes = [];
+
+  // Helper function to add reminders
+  const addReminder = (time, typeSuffix) => {
+    if (time > now) {
+      const type = `appointment_reminder_${typeSuffix}`;
+      const reminderText = getReminderText(typeSuffix, appointment.slot.startTime);
+      const videoText = appointment.videoConferenceLink
+        ? ` Join the video call: ${appointment.videoConferenceLink}`
+        : '';
+
+      // Patient reminder
+      reminderNotifications.push({
+        referenceId: appointment._id,
+        user: appointment.patient._id,
+        message: `${reminderText}${videoText}`,
+        type,
+        status: "scheduled",
+        scheduledFor: time
+      });
+
+      // Doctor reminder
+      reminderNotifications.push({
+        referenceId: appointment._id,
+        user: appointment.doctor._id,
+        message: `${reminderText}${videoText}`,
+        type,
+        status: "scheduled",
+        scheduledFor: time
+      });
+
+      reminderTypes.push(typeSuffix);
+      console.log(`Prepared ${typeSuffix} reminder for appointment ${appointment._id}`);
+    }
+  };
+
+  // Add all reminders
+  addReminder(oneDayBefore, '1-day');
+  addReminder(oneHourBefore, '1-hour');
+  addReminder(thirtyMinBefore, '30-min');
+  addReminder(tenMinBefore, '10-min');
+
+  // Check for existing reminders
+  if (reminderNotifications.length > 0) {
+    const existingReminders = await Notification.find({
+      referenceId: appointment._id,
+      type: { $in: reminderNotifications.map(r => r.type) }
     });
 
-    // Log record of scheduled reminder
-    console.log(`Scheduled 1-day reminder for appointment ${appointment._id} at ${oneDayBefore}`);
+    // Filter out existing reminders
+    const existingTypes = existingReminders.map(r => r.type);
+    const newReminders = reminderNotifications.filter(
+      r => !existingTypes.includes(r.type)
+    );
 
-    // Add to appointment reminders array
-    updateAppointmentReminders(appointment._id, "email", "scheduled", "1-day");
-  }
+    // Insert only new reminders
+    if (newReminders.length > 0) {
+      await Notification.insertMany(newReminders);
+      console.log(`Created ${newReminders.length} new reminder notifications for appointment ${appointment._id}`);
 
-  // Schedule 1-hour reminder (SMS)
-  if (oneHourBefore > now) {
-    schedule.scheduleJob(oneHourBefore, async () => {
-      await sendReminderNotification(appointment, "1-hour");
-    });
-
-    // Log record of scheduled reminder
-    console.log(`Scheduled 1-hour reminder for appointment ${appointment._id} at ${oneHourBefore}`);
-
-    // Add to appointment reminders array
-    updateAppointmentReminders(appointment._id, "sms", "scheduled", "1-hour");
-  }
-
-  // Schedule 30-min reminder (push)
-  if (thirtyMinBefore > now) {
-    schedule.scheduleJob(thirtyMinBefore, async () => {
-      await sendReminderNotification(appointment, "30-min");
-    });
-
-    // Log record of scheduled reminder
-    console.log(`Scheduled 30-min reminder for appointment ${appointment._id} at ${thirtyMinBefore}`);
-
-    // Add to appointment reminders array
-    updateAppointmentReminders(appointment._id, "push", "scheduled", "30-min");
-  }
-
-  // Schedule 10-min reminder (SMS)
-  if (tenMinBefore > now) {
-    schedule.scheduleJob(tenMinBefore, async () => {
-      await sendReminderNotification(appointment, "10-min");
-    });
-
-    // Log record of scheduled reminder
-    console.log(`Scheduled 10-min reminder for appointment ${appointment._id} at ${tenMinBefore}`);
-
-    // Add to appointment reminders array
-    updateAppointmentReminders(appointment._id, "sms", "scheduled", "10-min");
+      // Update appointment reminders tracking
+      for (const typeSuffix of reminderTypes) {
+        await updateAppointmentReminders(
+          appointment._id,
+          getChannelType(typeSuffix),
+          "scheduled",
+          typeSuffix
+        );
+      }
+    } else {
+      console.log(`All reminders already exist for appointment ${appointment._id}`);
+    }
   }
 };
 
 /**
- * Send reminder notification for an appointment
+ * Get reminder text based on type
  */
-const sendReminderNotification = async (appointment, reminderType) => {
-  try {
-    const appointmentObj = appointment._id ? appointment : await Appointment.findById(appointment)
-      .populate("patient")
-      .populate("doctor");
+const getReminderText = (type, startTime) => {
+  switch (type) {
+    case '1-day':
+      return `Reminder: You have an appointment tomorrow at ${startTime}.`;
+    case '1-hour':
+      return `Reminder: Your appointment starts in 1 hour at ${startTime}.`;
+    case '30-min':
+      return `Reminder: Your appointment starts in 30 minutes at ${startTime}.`;
+    case '10-min':
+      return `Reminder: Your appointment starts in 10 minutes at ${startTime}.`;
+    default:
+      return `Reminder: Your appointment is coming up at ${startTime}.`;
+  }
+};
 
-    if (!appointmentObj || appointmentObj.status !== "confirmed") return;
-
-    let reminderText;
-    switch (reminderType) {
-      case "1-day":
-        reminderText = `Reminder: You have an appointment tomorrow at ${appointmentObj.slot.startTime}.`;
-        break;
-      case "1-hour":
-        reminderText = `Reminder: Your appointment starts in 1 hour at ${appointmentObj.slot.startTime}.`;
-        break;
-      case "30-min":
-        reminderText = `Reminder: Your appointment starts in 30 minutes at ${appointmentObj.slot.startTime}.`;
-        break;
-      case "10-min":
-        reminderText = `Reminder: Your appointment starts in 10 minutes at ${appointmentObj.slot.startTime}.`;
-        break;
-      default:
-        reminderText = `Reminder: You have an upcoming appointment at ${appointmentObj.slot.startTime}.`;
-    }
-
-    const videoText = appointmentObj.videoConferenceLink
-      ? ` Join the video call: ${appointmentObj.videoConferenceLink}`
-      : '';
-
-    // Send to patient
-    await createNotification(
-      appointmentObj._id,
-      appointmentObj.patient._id,
-      `${reminderText}${videoText}`,
-      `appointment_reminder_${reminderType}`
-    );
-
-    // Send to doctor
-    await createNotification(
-      appointmentObj._id,
-      appointmentObj.doctor.user,
-      `${reminderText}${videoText}`,
-      `appointment_reminder_${reminderType}`
-    );
-
-    // Determine channel type based on reminder type
-    let channelType;
-    switch (reminderType) {
-      case "1-day":
-        channelType = "email";
-        break;
-      case "1-hour":
-      case "10-min":
-        channelType = "sms";
-        break;
-      case "30-min":
-        channelType = "push";
-        break;
-      default:
-        channelType = "email";
-    }
-
-    // Update appointment reminder status
-    updateAppointmentReminders(
-      appointmentObj._id,
-      channelType,
-      "sent",
-      reminderType
-    );
-  } catch (error) {
-    console.error(`Error sending ${reminderType} reminder:`, error);
+/**
+ * Get channel type based on reminder type
+ */
+const getChannelType = (reminderType) => {
+  switch (reminderType) {
+    case "1-day":
+      return "email";
+    case "1-hour":
+    case "10-min":
+      return "sms";
+    case "30-min":
+      return "push";
+    default:
+      return "email";
   }
 };
 
@@ -274,6 +229,19 @@ const createNotification = async (referenceId, userId, message, type) => {
       return;
     }
 
+    // Check if notification exists in database
+    const existingNotification = await Notification.findOne({
+      referenceId,
+      user: userId,
+      type
+    });
+
+    if (existingNotification) {
+      console.log(`Notification already exists: ${notificationKey}`);
+      notificationsSent.set(notificationKey, true);
+      return existingNotification;
+    }
+
     // Create notification in database
     const notification = await Notification.create({
       referenceId,
@@ -286,10 +254,8 @@ const createNotification = async (referenceId, userId, message, type) => {
     // Mark as sent in our local tracking
     notificationsSent.set(notificationKey, true);
 
+    console.log(`Created new notification: ${notificationKey}`);
     return notification;
-
-    // Note: We no longer need to handle sending here because the notification monitor service
-    // will detect the new notification and send it automatically
   } catch (error) {
     console.error("Error creating notification:", error);
   }
@@ -332,6 +298,9 @@ const formatDate = (date) => {
  */
 const initAppointmentNotificationService = async () => {
   try {
+    // Clear in-memory tracking on startup
+    notificationsSent.clear();
+
     // Start the watcher for new changes
     startAppointmentWatcher();
 
@@ -339,19 +308,31 @@ const initAppointmentNotificationService = async () => {
     const futureAppointments = await Appointment.find({
       status: "confirmed",
       date: { $gt: new Date() }
-    }).populate("patient doctor").select("-reminders");
+    }).populate("patient doctor");
 
-    console.log(`Processing ${futureAppointments.length} existing confirmed appointments...`);
+    console.log(`Found ${futureAppointments.length} confirmed future appointments to process...`);
 
-    // For video appointments without a Google Meet link, create and update links
+    // Process each future appointment
     for (const appointment of futureAppointments) {
-      if (appointment.appointmentType === "video" && !appointment.videoConferenceLink) {
-        appointment.doctor = await User.findById(appointment.doctor.user);
-        await createAndUpdateMeetLink(appointment, appointment.doctor);
-      }
+      try {
+        // Check if notifications already exist for this appointment
+        const existingNotifications = await Notification.find({
+          referenceId: appointment._id,
+          $or: [
+            { type: { $regex: /^appointment_reminder_/ } },
+            { type: { $in: ["appointment_confirmation", "appointment_scheduled"] } }
+          ]
+        });
 
-      // Schedule reminders for each future appointment
-      // scheduleReminders(appointment);
+        if (existingNotifications.length === 0) {
+          console.log(`Processing new appointment ${appointment._id}`);
+          await handleConfirmedAppointment(appointment);
+        } else {
+          console.log(`Skipping appointment ${appointment._id} - notifications already exist`);
+        }
+      } catch (error) {
+        console.error(`Error processing appointment ${appointment._id}:`, error);
+      }
     }
 
     console.log("🔔 Appointment notification service initialized successfully!");
