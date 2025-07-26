@@ -78,7 +78,7 @@ mailRouter.post('/sendAppointmentConfirmation', async(req, res) => {
     try {
         const { email, sub, patientName, doctorName, specialization, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem, meetingLink, clinicAddress } = req.body;
         
-        if (!email || !sub || !patientName || !doctorName || !specialization || !appointmentDate || !appointmentStartTime || !appointmentEndTime || !patientProblem) {
+        if (!email || !sub || !patientName || !doctorName || !specialization || !appointmentDate || !appointmentStartTime || !appointmentEndTime ) {
             return res.status(400).json({ message: "Missing required fields" });
         }
 
@@ -96,7 +96,7 @@ mailRouter.post('/sendAppointmentScheduled', async(req, res) => {
     try {
         const { email, sub, doctorName, patientName, patientAge, patientGender, appointmentDate, appointmentStartTime, appointmentEndTime, patientProblem, meetingLink } = req.body;
         
-        if (!email || !sub || !patientName || !doctorName || !patientAge || !patientGender || !appointmentDate || !appointmentStartTime || !appointmentEndTime || !patientProblem) {
+        if (!email || !sub || !patientName || !doctorName || !patientAge || !patientGender || !appointmentDate || !appointmentStartTime || !appointmentEndTime ) {
             return res.status(400).json({ message: "Missing required fields" });
         }
 

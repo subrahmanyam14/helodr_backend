@@ -84,7 +84,7 @@ storageRouter.post("/upload", upload.single("file"), (req, res) => {
         return res.status(400).json({ message: "No file uploaded." });
     }
     
-    const fileUrl = `/uploads/${req.file.destination.split('/')[1]}/${req.file.filename}`;
+    const fileUrl = `${process.env.TRANSPORT_URL}/uploads/${req.file.destination.split('/')[1]}/${req.file.filename}`;
     
     res.json({ 
         url: fileUrl,
@@ -104,7 +104,7 @@ storageRouter.post("/upload-multiple", upload.array("files", 10), (req, res) => 
     }
     
     const fileDetails = req.files.map(file => ({
-        url: `/uploads/${file.destination.split('/')[1]}/${file.filename}`,
+        url: `${process.env.TRANSPORT_URL}/uploads/${file.destination.split('/')[1]}/${file.filename}`,
         filename: file.filename,
         originalName: file.originalname,
         size: file.size,
