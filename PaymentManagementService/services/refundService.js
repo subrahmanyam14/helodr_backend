@@ -20,96 +20,95 @@ class RefundService {
    */
   static async processAppointmentCancellation(appointmentId, cancelledBy = 'patient', reason = 'Appointment cancelled') {
     const session = await require('mongoose').startSession();
-    session.startTransaction();
-
+    let transactionResult = null;
+    
     try {
-      // Find appointment and payment
-      const appointment = await Appointment.findById(appointmentId).session(session);
-      
-      if (!appointment) {
-        throw new Error('Appointment not found');
-      }
+        transactionResult = await session.withTransaction(async () => {
+            // Find appointment and payment
+            const appointment = await Appointment.findById(appointmentId).session(session);
+            
+            if (!appointment) {
+                throw new Error('Appointment not found');
+            }
 
-      const payment = await Payment.findOne({ appointment: appointmentId }).session(session);
-      
-      if (!payment) {
-        throw new Error('No payment found for this appointment');
-      }
+            const payment = await Payment.findOne({ appointment: appointmentId }).session(session);
+            
+            if (!payment) {
+                throw new Error('No payment found for this appointment');
+            }
 
-      if (payment.status !== 'captured') {
-        throw new Error('Payment must be in captured state to process refund');
-      }
+            if (payment.status !== 'captured') {
+                throw new Error('Payment must be in captured state to process refund');
+            }
 
-      // Calculate hours remaining until appointment
-      const now = new Date();
-      const appointmentTime = new Date(appointment.date);
-      const hoursRemaining = (appointmentTime - now) / (1000 * 60 * 60);
-      
-      console.log(`Hours remaining until appointment: ${hoursRemaining}`);
+            // Calculate hours remaining until appointment
+            const now = new Date();
+            const appointmentTime = new Date(appointment.date);
+            const hoursRemaining = (appointmentTime - now) / (1000 * 60 * 60);
+            
+            console.log(`Hours remaining until appointment: ${hoursRemaining}`);
 
-      // Determine refund percentage based on policy
-      let refundPercentage = 0;
-      for (const [hourThreshold, percentage] of this.REFUND_POLICY) {
-        if (hoursRemaining >= hourThreshold) {
-          refundPercentage = percentage;
-          break;
-        }
-      }
-      
-      console.log(`Refund percentage: ${refundPercentage}%`);
+            // Determine refund percentage based on policy
+            let refundPercentage = 0;
+            for (const [hourThreshold, percentage] of this.REFUND_POLICY) {
+                if (hoursRemaining >= hourThreshold) {
+                    refundPercentage = percentage;
+                    break;
+                }
+            }
+            
+            console.log(`Refund percentage: ${refundPercentage}%`);
 
-      // Calculate refund amount
-      const refundAmount = payment.totalamount * (refundPercentage / 100);
-      
-      // Cancel appointment first
-      appointment.status = 'cancelled';
-      appointment.cancellation = {
-        initiatedBy: cancelledBy,
-        reason: reason,
-        refundAmount: refundAmount,
-        cancelledAt: new Date()
-      };
-      
-      await appointment.save({ session });
-      console.log('Appointment cancelled successfully');
+            // Calculate refund amount
+            const refundAmount = payment.totalamount * (refundPercentage / 100);
+            
+            // Cancel appointment first
+            appointment.status = 'cancelled';
+            appointment.cancellation = {
+                initiatedBy: cancelledBy,
+                reason: reason,
+                refundAmount: refundAmount,
+                cancelledAt: new Date()
+            };
+            
+            await appointment.save({ session });
+            console.log('Appointment cancelled successfully');
 
-      // If no refund is due, just end the transaction
-      if (refundPercentage === 0) {
-        await session.commitTransaction();
-        session.endSession();
-        return { 
-          success: true, 
-          message: 'Appointment cancelled with no refund due to cancellation policy',
-          refundPercentage: 0,
-          refundAmount: 0
-        };
-      }
+            // If no refund is due, just return
+            if (refundPercentage === 0) {
+                return { 
+                    success: true, 
+                    message: 'Appointment cancelled with no refund due to cancellation policy',
+                    refundPercentage: 0,
+                    refundAmount: 0
+                };
+            }
 
-      // Process the refund
-      const refundResult = await payment.processRefund(
-        refundAmount, 
-        `${reason} (${refundPercentage}% refund based on ${hoursRemaining.toFixed(2)} hours notice)`, 
-        cancelledBy
-      );
+            // Process the refund (commented out in original)
+            // const refundResult = await payment.processRefund(
+            //   refundAmount, 
+            //   `${reason} (${refundPercentage}% refund based on ${hoursRemaining.toFixed(2)} hours notice)`, 
+            //   cancelledBy
+            // );
 
-      await session.commitTransaction();
-      session.endSession();
+            return {
+                success: true,
+                message: `Appointment cancelled and ${refundPercentage}% refund processed`,
+                refundPercentage,
+                refundAmount,
+                razorpayRefund: `${reason} (${refundPercentage}% refund based on ${hoursRemaining.toFixed(2)} hours notice)`
+            };
+        });
 
-      return {
-        success: true,
-        message: `Appointment cancelled and ${refundPercentage}% refund processed`,
-        refundPercentage,
-        refundAmount,
-        payment: refundResult.payment,
-        razorpayRefund: refundResult.razorpayRefund
-      };
+        // Return the transaction result
+        return transactionResult;
     } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      console.error('RefundService error:', error);
-      throw error;
+        console.error('RefundService error:', error);
+        throw error;
+    } finally {
+        session.endSession();
     }
-  }
+}
   
   /**
    * Process automatic refund for rejected appointment

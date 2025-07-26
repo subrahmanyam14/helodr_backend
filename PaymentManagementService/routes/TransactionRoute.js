@@ -58,4 +58,12 @@ router.get(
   transactionController.getWeekAndMonthEarning
 );
 
+router.get(
+  '/patient/getPaymentDashboard',
+  protect,
+  authorize( 'patient'),
+  transactionController.getPaymentDashboard
+);
+
+
 module.exports = router;

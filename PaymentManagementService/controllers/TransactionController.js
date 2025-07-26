@@ -1,4 +1,5 @@
 const Transaction = require("../models/Transaction");
+const Payment = require("../models/Payment");
 const mongoose = require("mongoose");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 
@@ -623,7 +624,163 @@ const getWeekAndMonthEarning = async (req, res) => {
   }
 };
 
+/**
+ * Get payment dashboard data for a specific user (patient)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+const getPaymentDashboard = async (req, res) => {
+  try {
+    const userId = req.user.id; // or get from req.user if using auth middleware
+    const { page = 1, limit = 10 } = req.query;
 
+    // Validate userId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID"
+      });
+    }
+
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+
+    // 1. Get summary data
+    const summaryAggregation = await Payment.aggregate([
+      {
+        $match: { patient: new mongoose.Types.ObjectId(userId) }
+      },
+      {
+        $group: {
+          _id: null,
+          totalSpent: {
+            $sum: {
+              $cond: [
+                { $in: ["$status", ["captured", "refunded", "partially_refunded"]] },
+                "$totalamount",
+                0
+              ]
+            }
+          },
+          totalTransactions: { $sum: 1 },
+          pendingRefunds: {
+            $sum: {
+              $cond: [
+                { $eq: ["$refund.status", "pending"] },
+                "$refund.amount",
+                0
+              ]
+            }
+          },
+          successfulPayments: {
+            $sum: {
+              $cond: [
+                { $eq: ["$status", "captured"] },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    const summary = summaryAggregation[0] || {
+      totalSpent: 0,
+      totalTransactions: 0,
+      pendingRefunds: 0,
+      successfulPayments: 0
+    };
+
+    // 2. Get recent payments with doctor and appointment details
+    const recentPayments = await Payment.find({ patient: userId })
+      .populate({
+        path: 'doctor',
+        select: 'fullName'
+      })
+      .populate({
+        path: 'appointment',
+        select: 'date appointmentType'
+      })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // 3. Get recent transactions
+    const recentTransactions = await Transaction.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    // 4. Format the response data
+    const formattedPayments = recentPayments.map(payment => ({
+      id: payment._id.toString(),
+      appointmentId: payment.appointment?._id?.toString() || null,
+      doctorName: payment.doctor?.fullName || 'Unknown Doctor',
+      amount: payment.amount || 0,
+      gstAmount: payment.gstamount || 0,
+      totalAmount: payment.totalamount || payment.amount || 0,
+      status: payment.status,
+      paymentMethod: payment.paymentMethod,
+      gateway: {
+        name: payment.gateway?.name || null,
+        transactionId: payment.gateway?.transactionId || null,
+        referenceId: payment.gateway?.referenceId || null
+      },
+      appointmentDate: payment.appointment?.date || null,
+      appointmentType: payment.appointment?.appointmentType || null,
+      createdAt: payment.createdAt,
+      refund: payment.refund ? {
+        amount: payment.refund.amount,
+        reason: payment.refund.reason,
+        initiatedBy: payment.refund.initiatedBy,
+        status: payment.refund.status
+      } : null
+    }));
+
+    const formattedTransactions = recentTransactions.map(transaction => ({
+      id: transaction._id.toString(),
+      type: transaction.type,
+      amount: transaction.amount,
+      status: transaction.status,
+      referenceId: transaction.referenceId?.toString() || null,
+      referenceType: transaction.referenceType,
+      notes: transaction.notes,
+      createdAt: transaction.createdAt
+    }));
+
+    // 5. Return formatted response
+    return res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          totalSpent: summary.totalSpent || 0,
+          totalTransactions: summary.totalTransactions || 0,
+          pendingRefunds: summary.pendingRefunds || 0,
+          successfulPayments: summary.successfulPayments || 0
+        },
+        recentPayments: formattedPayments,
+        transactions: formattedTransactions,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(summary.totalTransactions / limit),
+          hasNextPage: skip + formattedPayments.length < summary.totalTransactions,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching payment dashboard data:', error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
 
 
 module.exports = {
@@ -633,5 +790,6 @@ module.exports = {
   updateTransactionStatus,
   getTransactionStats,
   getAllTransactions,
-  getWeekAndMonthEarning
+  getWeekAndMonthEarning,
+  getPaymentDashboard
 };

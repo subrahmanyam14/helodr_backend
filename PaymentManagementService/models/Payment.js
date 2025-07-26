@@ -81,7 +81,7 @@ paymentSchema.statics.createPayment = async function (paymentData, appointmentDa
     await Transaction.createTransaction({
       user: payment.patient,
       type: "appointment_payment",
-      amount: payment.amount,
+      amount: payment.totalamount,
       referenceId: payment._id,
       referenceType: "Payment",
       status: payment.status === "captured" ? "completed" : "pending",

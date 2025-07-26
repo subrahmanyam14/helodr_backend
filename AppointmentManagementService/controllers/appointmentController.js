@@ -4,6 +4,7 @@ const Availability = require('../models/Availability');
 const Payment = require('../models/Payment');
 const Notification = require('../models/Notification');
 const Doctor = require('../models/Doctor'); // Added missing import
+const Hospital = require("../models/Hospital");
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Statistics = require("../models/Statistics");
@@ -574,7 +575,7 @@ async function calculateAppointmentFee(doctorId, consultationType) {
 exports.getAppointments = async (req, res) => {
   try {
     let query = {};
-    const { status, sortDirection, limit = 10, page = 1 } = req.query;
+    const { status, limit = 10, page = 1 } = req.query;
     const skip = (page - 1) * limit;
 
     // For patients
@@ -590,26 +591,32 @@ exports.getAppointments = async (req, res) => {
         return res.status(404).json({ success: false, message: 'Doctor profile not found' });
       }
     }
-
-
+   
     if (status) {
       query.status = status;
     }
 
     const appointments = await Appointment.find(query)
-      .populate('doctor', 'user')
       .populate({
         path: 'doctor',
-        populate: {
-          path: 'user',
-          select: 'fullName profilePhoto'
-        }
+        select: 'specializations hospitalAffiliations',
+        populate: [
+          {
+            path: 'user',
+            select: 'fullName profilePhoto'
+          },
+          {
+            path: 'hospitalAffiliations.hospital',
+            select: 'name type address coordinates'
+          }
+        ]
       })
       .populate('patient', 'fullName profilePhoto')
+      .select('-reminders -prescription')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-
+      //  console.log("data----------------------------------------");
     const total = await Appointment.countDocuments(query);
 
     res.status(200).json({
@@ -623,7 +630,7 @@ exports.getAppointments = async (req, res) => {
       }
     });
   } catch (err) {
-    console.log("Error in the getAppoinments, ", err);
+    console.log("Error in the getAppointments: ", err);
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 };

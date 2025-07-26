@@ -713,23 +713,23 @@ const refundPayment = async (req, res) => {
 
     await transaction.save({ session });
 
-    // Create notifications
-    const notificationDocs = [
-      new Notification({
-        referenceId: payment.appointment._id,
-        user: payment.patient,
-        message: `Appointment cancelled and refund of ₹${payment.totalamount} initiated`,
-        type: "refund"
-      }),
-      new Notification({
-        referenceId: payment.appointment._id,
-        user: payment.doctor,
-        message: "Appointment has been cancelled",
-        type: "appointment"
-      })
-    ];
+    // // Create notifications
+    // const notificationDocs = [
+    //   new Notification({
+    //     referenceId: payment.appointment._id,
+    //     user: payment.patient,
+    //     message: `Appointment cancelled and refund of ₹${payment.totalamount} initiated`,
+    //     type: "refund"
+    //   }),
+    //   new Notification({
+    //     referenceId: payment.appointment._id,
+    //     user: payment.doctor,
+    //     message: "Appointment has been cancelled",
+    //     type: "appointment"
+    //   })
+    // ];
 
-    await Notification.insertMany(notificationDocs, { session });
+    // await Notification.insertMany(notificationDocs, { session });
 
     await session.commitTransaction();
     session.endSession();
