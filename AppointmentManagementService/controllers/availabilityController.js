@@ -598,6 +598,15 @@ exports.createAvailability = async (req, res) => {
       });
     }
 
+    const doctorDetails = await Doctor.findById(req.body.doctor).select("onlineConsultation clinicConsultationFee");
+    
+    if (!doctorDetails) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor not found'
+      });
+    }
+
     const existingAvailability = await Availability.findOne({
       doctor: req.body.doctor,
       isActive: true,
@@ -616,17 +625,71 @@ exports.createAvailability = async (req, res) => {
     }
 
     let hasValidConsultationTypes = false;
+    
+    // Process the schedule to add fees automatically
     if (req.body.schedule && Array.isArray(req.body.schedule)) {
       for (const daySchedule of req.body.schedule) {
         if (daySchedule.shifts && Array.isArray(daySchedule.shifts)) {
           for (const shift of daySchedule.shifts) {
             if (shift.consultationTypes && shift.consultationTypes.length > 0) {
               hasValidConsultationTypes = true;
-              break;
+              
+              // Add fees to consultation types
+              shift.consultationTypes = shift.consultationTypes.map(consultationType => {
+                let fee;
+                
+                if (consultationType.type === 'clinic') {
+                  fee = doctorDetails.clinicConsultationFee?.consultationFee;
+                  if (fee === undefined || fee === null) {
+                    throw new Error('Clinic consultation fee not found for doctor');
+                  }
+                } else if (consultationType.type === 'video') {
+                  fee = doctorDetails.onlineConsultation?.consultationFee;
+                  if (fee === undefined || fee === null) {
+                    throw new Error('Online consultation fee not found for doctor');
+                  }
+                }
+                
+                return {
+                  ...consultationType,
+                  fee: fee
+                };
+              });
             }
           }
         }
-        if (hasValidConsultationTypes) break;
+      }
+    }
+
+    // Also process overrides if they exist
+    if (req.body.overrides && Array.isArray(req.body.overrides)) {
+      for (const override of req.body.overrides) {
+        if (override.shifts && Array.isArray(override.shifts)) {
+          for (const shift of override.shifts) {
+            if (shift.consultationTypes && shift.consultationTypes.length > 0) {
+              shift.consultationTypes = shift.consultationTypes.map(consultationType => {
+                let fee;
+                
+                if (consultationType.type === 'clinic') {
+                  fee = doctorDetails.clinicConsultationFee?.consultationFee;
+                  if (fee === undefined || fee === null) {
+                    throw new Error('Clinic consultation fee not found for doctor');
+                  }
+                } else if (consultationType.type === 'video') {
+                  fee = doctorDetails.onlineConsultation?.consultationFee;
+                  if (fee === undefined || fee === null) {
+                    throw new Error('Online consultation fee not found for doctor');
+                  }
+                }
+                
+                return {
+                  ...consultationType,
+                  fee: fee
+                };
+              });
+            }
+          }
+        }
       }
     }
 
@@ -673,39 +736,119 @@ exports.updateAvailability = async (req, res) => {
       });
     }
 
-    const availabilityToUpdate = await Availability.findOne({ doctor: req.user.doctorId });
+    const doctorId = req.body.doctor;
+    
+    // Find the active availability for the doctor
+    const existingAvailability = await Availability.findOne({
+      doctor: doctorId,
+      isActive: true,
+      effectiveFrom: { $lte: new Date() },
+      $or: [
+        { effectiveTo: { $gte: new Date() } },
+        { effectiveTo: null }
+      ]
+    });
 
-    if (!availabilityToUpdate) {
+    if (!existingAvailability) {
       return res.status(404).json({
         success: false,
-        message: 'Availability not found'
+        message: 'No active availability schedule found for this doctor'
       });
     }
 
-    Object.keys(req.body).forEach(key => {
-      availabilityToUpdate[key] = req.body[key];
-    });
+    // Get doctor details for fee information
+    const doctorDetails = await Doctor.findById(doctorId)
+      .select("onlineConsultation clinicConsultationFee");
+    
+    if (!doctorDetails) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor not found'
+      });
+    }
 
-    await availabilityToUpdate.save();
+    // Preserve existing overrides and booked slots
+    const preservedData = {
+      overrides: existingAvailability.overrides,
+      bookedSlots: existingAvailability.bookedSlots
+    };
+
+    let hasValidConsultationTypes = false;
+    
+    // Process the schedule to add fees automatically
+    if (req.body.schedule && Array.isArray(req.body.schedule)) {
+      for (const daySchedule of req.body.schedule) {
+        if (daySchedule.shifts && Array.isArray(daySchedule.shifts)) {
+          for (const shift of daySchedule.shifts) {
+            if (shift.consultationTypes && shift.consultationTypes.length > 0) {
+              hasValidConsultationTypes = true;
+              
+              // Add fees to consultation types
+              shift.consultationTypes = shift.consultationTypes.map(consultationType => {
+                let fee;
+                
+                if (consultationType.type === 'clinic') {
+                  fee = doctorDetails.clinicConsultationFee?.consultationFee;
+                  if (fee === undefined || fee === null) {
+                    throw new Error('Clinic consultation fee not found for doctor');
+                  }
+                } else if (consultationType.type === 'video') {
+                  fee = doctorDetails.onlineConsultation?.consultationFee;
+                  if (fee === undefined || fee === null) {
+                    throw new Error('Online consultation fee not found for doctor');
+                  }
+                }
+                
+                return {
+                  ...consultationType,
+                  fee: fee
+                };
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (!hasValidConsultationTypes && (!req.body.schedule || req.body.schedule.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one shift must have consultation types defined'
+      });
+    }
+
+    // Prepare update data - merge new data with preserved data
+    const updateData = {
+      ...req.body,
+      overrides: preservedData.overrides,
+      bookedSlots: preservedData.bookedSlots,
+      updatedAt: new Date()
+    };
+
+    // Update the availability
+    const updatedAvailability = await Availability.findByIdAndUpdate(
+      existingAvailability._id,
+      updateData,
+      { 
+        new: true, 
+        runValidators: true 
+      }
+    );
 
     res.status(200).json({
       success: true,
-      data: availabilityToUpdate
+      data: updatedAvailability,
+      message: 'Availability schedule updated successfully'
     });
+
   } catch (error) {
     console.error(error);
+    
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
         success: false,
         message: messages.join(', ')
-      });
-    }
-
-    if (error.kind === 'ObjectId') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid availability ID format'
       });
     }
 
@@ -1597,20 +1740,7 @@ exports.updateDoctorAvailability = async (req, res) => {
       });
     }
 
-    // Helper function to check time overlap
-    const checkTimeOverlap = (start1, end1, start2, end2) => {
-      const parseTime = (timeStr) => {
-        const [hours, minutes] = timeStr.split(':').map(Number);
-        return hours * 60 + minutes; // Convert to minutes
-      };
-      
-      const s1 = parseTime(start1);
-      const e1 = parseTime(end1);
-      const s2 = parseTime(start2);
-      const e2 = parseTime(end2);
-      
-      return (s1 < e2 && s2 < e1);
-    };
+    
 
     // Helper function to create shifts from allocated slots - SEPARATE SHIFTS FOR EACH TYPE
     const createShiftsFromSlots = (dayData) => {

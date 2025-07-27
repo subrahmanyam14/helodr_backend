@@ -36,8 +36,7 @@ availabilityRouter.post(
       check('schedule.*.shifts.*.startTime', 'Start time is required').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
       check('schedule.*.shifts.*.endTime', 'End time is required').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
       check('schedule.*.shifts.*.consultationTypes', 'At least one consultation type is required').isArray({ min: 1 }),
-      check('schedule.*.shifts.*.consultationTypes.*.type', 'Consultation type must be either clinic or video').isIn(['clinic', 'video']),
-      check('schedule.*.shifts.*.consultationTypes.*.fee', 'Fee must be a positive number').isNumeric().toFloat().isFloat({ min: 0 })
+      check('schedule.*.shifts.*.consultationTypes.*.type', 'Consultation type must be either clinic or video').isIn(['clinic', 'video'])
     ]
   ],
   availabilityController.createAvailability

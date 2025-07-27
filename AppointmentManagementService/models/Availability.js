@@ -55,11 +55,6 @@ const availabilitySchema = new mongoose.Schema({
           required: true,
           min: 0
         },
-        maxPatients: {
-          type: Number,
-          min: 1,
-          default: 1
-        }
       }]
     }]
   }],
@@ -84,7 +79,6 @@ const availabilitySchema = new mongoose.Schema({
           type: Number,
           min: 0
         },
-        maxPatients: Number
       }]
     }],
     reason: String
