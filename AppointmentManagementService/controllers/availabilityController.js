@@ -737,16 +737,17 @@ exports.updateAvailability = async (req, res) => {
     }
 
     const doctorId = req.body.doctor;
+    console.log("--------------------doctorId", doctorId);
     
     // Find the active availability for the doctor
     const existingAvailability = await Availability.findOne({
-      doctor: doctorId,
-      isActive: true,
-      effectiveFrom: { $lte: new Date() },
-      $or: [
-        { effectiveTo: { $gte: new Date() } },
-        { effectiveTo: null }
-      ]
+      doctor: doctorId
+      // isActive: true,
+      // effectiveFrom: { $lte: new Date() },
+      // $or: [
+      //   { effectiveTo: { $gte: new Date() } },
+      //   { effectiveTo: null }
+      // ]
     });
 
     if (!existingAvailability) {
