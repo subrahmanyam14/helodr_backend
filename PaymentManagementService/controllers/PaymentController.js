@@ -222,7 +222,7 @@ const createDummyPayment = async (req, res) => {
       }
     }, new Date()); // Optionally use the appointment date here
 
-    console.log("doctor details: , ", appointment.doctor);
+    // console.log("doctor details: , ", appointment.doctor);
     // Update the appointment status
     await Appointment.findByIdAndUpdate(
       appointmentId,
