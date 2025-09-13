@@ -208,7 +208,10 @@ const doctorSchema = new mongoose.Schema({
       ref: "Hospital"
     },
     department: String,
-    position: String
+    position: String,
+    from: Date,
+    to: Date,
+    currentlyWorking: {type: Boolean, default: false}
   }],
 
   address: {
@@ -244,7 +247,7 @@ const doctorSchema = new mongoose.Schema({
     },
     verifiedAt: Date,
     comments: String
-  },
+  },//todo-add verified by hospitaladmin
 
   verifiedBySuperAdmin: {
     superAdmin:
@@ -254,7 +257,7 @@ const doctorSchema = new mongoose.Schema({
     },
     verifiedAt: Date,
     comments: String
-  },
+  },   //pikey
 
   isActive: {
     type: Boolean,

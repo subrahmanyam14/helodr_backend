@@ -65,7 +65,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["patient", "doctor", "admin", "superadmin"],
+      enum: ["patient", "doctor", "admin", "superadmin", "hospitaladmin"],
       default: "patient"
     },
     isEmailVerified: {
@@ -103,6 +103,10 @@ const userSchema = new mongoose.Schema(
     doctorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Doctor"
+    },
+    hospitalId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Hospital"
     },
     medicalRecords: [{
       type: {
