@@ -1545,6 +1545,437 @@ const DoctorController = {
     }
   },
 
+  getDoctorsWithAffiliations: async (req, res) => {
+    try {
+      const {
+        currentlyWorking,
+        hospitalId,
+        specialization,
+        city,
+        state,
+        page = 1,
+        limit = 10
+      } = req.query;
+
+      // Build query
+      const query = {};
+
+      // Filter by specialization
+      if (specialization) {
+        query.specializations = specialization;
+      }
+
+      // Filter by city
+      if (city) {
+        query['address.city'] = { $regex: city, $options: 'i' };
+      }
+
+      // Filter by state
+      if (state) {
+        query['address.state'] = { $regex: state, $options: 'i' };
+      }
+
+      // Filter by hospital affiliation
+      if (hospitalId) {
+        query['hospitalAffiliations.hospital'] = hospitalId;
+      }
+
+      // Filter by currently working status
+      if (currentlyWorking !== undefined) {
+        const isCurrentlyWorking = currentlyWorking === 'true';
+
+        if (isCurrentlyWorking) {
+          // Doctors who are currently working at any hospital
+          query['hospitalAffiliations'] = {
+            $elemMatch: { currentlyWorking: true }
+          };
+        } else {
+          // Doctors who are not currently working at any hospital
+          query.$or = [
+            { 'hospitalAffiliations': { $size: 0 } },
+            {
+              'hospitalAffiliations': {
+                $not: { $elemMatch: { currentlyWorking: true } }
+              }
+            }
+          ];
+        }
+      }
+
+      // Pagination
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const doctors = await Doctor.find(query)
+        .populate('user', 'fullName email mobileNumber profilePhoto')
+        .populate('hospitalAffiliations.hospital', 'name type address contact featuredImage')
+        .select('-__v')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      // Get total count for pagination
+      const totalDoctors = await Doctor.countDocuments(query);
+
+      // Format response with affiliation status
+      const formattedDoctors = doctors.map(doctor => {
+        const doctorObj = doctor.toObject();
+
+        // Separate current and past affiliations
+        const currentAffiliations = doctor.hospitalAffiliations.filter(
+          aff => aff.currentlyWorking
+        );
+        const pastAffiliations = doctor.hospitalAffiliations.filter(
+          aff => !aff.currentlyWorking
+        );
+
+        return {
+          ...doctorObj,
+          affiliationStatus: {
+            isCurrentlyWorking: currentAffiliations.length > 0,
+            currentAffiliationsCount: currentAffiliations.length,
+            pastAffiliationsCount: pastAffiliations.length,
+            totalAffiliations: doctor.hospitalAffiliations.length
+          },
+          currentAffiliations,
+          pastAffiliations
+        };
+      });
+
+      res.status(200).json({
+        success: true,
+        count: doctors.length,
+        totalDoctors,
+        totalPages: Math.ceil(totalDoctors / parseInt(limit)),
+        currentPage: parseInt(page),
+        data: formattedDoctors
+      });
+
+    } catch (error) {
+      console.error('Error fetching doctors with affiliations:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch doctors',
+        error: error.message
+      });
+    }
+  },
+
+
+  getDoctorsByHospitalCurrent: async (req, res) => {
+    try {
+      const { hospitalId } = req.params;
+      const { specialization, page = 1, limit = 10 } = req.query;
+
+      // Verify hospital exists
+      const hospital = await Hospital.findById(hospitalId);
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Build query
+      const query = {
+        'hospitalAffiliations': {
+          $elemMatch: {
+            hospital: hospitalId,
+            currentlyWorking: true
+          }
+        }
+      };
+
+      // Filter by specialization if provided
+      if (specialization) {
+        query.specializations = specialization;
+      }
+
+      // Pagination
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const doctors = await Doctor.find(query)
+        .populate('user', 'fullName email mobileNumber profilePhoto')
+        .populate('hospitalAffiliations.hospital', 'name type address')
+        .select('-__v')
+        .sort({ 'review.averageRating': -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      const totalDoctors = await Doctor.countDocuments(query);
+
+      // Format to include only current affiliation details for this hospital
+      const formattedDoctors = doctors.map(doctor => {
+        const doctorObj = doctor.toObject();
+        const currentAffiliation = doctor.hospitalAffiliations.find(
+          aff => aff.hospital._id.toString() === hospitalId && aff.currentlyWorking
+        );
+
+        return {
+          ...doctorObj,
+          currentAffiliationAtThisHospital: currentAffiliation
+        };
+      });
+
+      res.status(200).json({
+        success: true,
+        hospital: {
+          id: hospital._id,
+          name: hospital.name
+        },
+        count: doctors.length,
+        totalDoctors,
+        totalPages: Math.ceil(totalDoctors / parseInt(limit)),
+        currentPage: parseInt(page),
+        data: formattedDoctors
+      });
+
+    } catch (error) {
+      console.error('Error fetching doctors by hospital:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch doctors',
+        error: error.message
+      });
+    }
+  },
+
+
+  getAvailableDoctors: async (req, res) => {
+    try {
+      const {
+        specialization,
+        city,
+        state,
+        page = 1,
+        limit = 10
+      } = req.query;
+
+      // Build query for doctors without current affiliations
+      const query = {
+        $or: [
+          { 'hospitalAffiliations': { $size: 0 } },
+          {
+            'hospitalAffiliations': {
+              $not: { $elemMatch: { currentlyWorking: true } }
+            }
+          }
+        ]
+      };
+
+      // Additional filters
+      if (specialization) {
+        query.specializations = specialization;
+      }
+
+      if (city) {
+        query['address.city'] = { $regex: city, $options: 'i' };
+      }
+
+      if (state) {
+        query['address.state'] = { $regex: state, $options: 'i' };
+      }
+
+      // Pagination
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      const doctors = await Doctor.find(query)
+        .populate('user', 'fullName email mobileNumber profilePhoto')
+        .populate('hospitalAffiliations.hospital', 'name type')
+        .select('-__v')
+        .sort({ experience: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      const totalDoctors = await Doctor.countDocuments(query);
+
+      res.status(200).json({
+        success: true,
+        message: 'Doctors available for hospital affiliation',
+        count: doctors.length,
+        totalDoctors,
+        totalPages: Math.ceil(totalDoctors / parseInt(limit)),
+        currentPage: parseInt(page),
+        data: doctors
+      });
+
+    } catch (error) {
+      console.error('Error fetching available doctors:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch available doctors',
+        error: error.message
+      });
+    }
+  },
+
+
+  getDoctorAffiliations: async (req, res) => {
+    try {
+      const { doctorId } = req.params;
+
+      const doctor = await Doctor.findById(doctorId)
+        .populate('user', 'fullName email mobileNumber profilePhoto')
+        .populate('hospitalAffiliations.hospital', 'name type address contact photos featuredImage');
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found'
+        });
+      }
+
+      // Organize affiliations
+      const currentAffiliations = doctor.hospitalAffiliations.filter(
+        aff => aff.currentlyWorking
+      );
+
+      const pastAffiliations = doctor.hospitalAffiliations.filter(
+        aff => !aff.currentlyWorking
+      );
+
+      // Calculate total experience from affiliations
+      const totalYearsInAffiliations = doctor.hospitalAffiliations.reduce((total, aff) => {
+        if (aff.from) {
+          const endDate = aff.to || new Date();
+          const years = (endDate - aff.from) / (1000 * 60 * 60 * 24 * 365);
+          return total + years;
+        }
+        return total;
+      }, 0);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          doctor: {
+            _id: doctor._id,
+            fullName: doctor.fullName,
+            title: doctor.title,
+            specializations: doctor.specializations,
+            registrationNumber: doctor.registrationNumber,
+            qualifications: doctor.qualifications,
+            experience: doctor.experience,
+            languages: doctor.languages,
+            bio: doctor.bio,
+            address: doctor.address,
+            review: doctor.review,
+            user: doctor.user
+          },
+          affiliationSummary: {
+            isCurrentlyWorking: currentAffiliations.length > 0,
+            currentAffiliationsCount: currentAffiliations.length,
+            pastAffiliationsCount: pastAffiliations.length,
+            totalAffiliations: doctor.hospitalAffiliations.length,
+            totalYearsInAffiliations: Math.round(totalYearsInAffiliations * 10) / 10
+          },
+          currentAffiliations: currentAffiliations.map(aff => ({
+            _id: aff._id,
+            hospital: aff.hospital,
+            department: aff.department,
+            position: aff.position,
+            from: aff.from,
+            duration: aff.from ?
+              `${Math.round((new Date() - aff.from) / (1000 * 60 * 60 * 24 * 365 * 10)) / 10} years` :
+              'N/A'
+          })),
+          pastAffiliations: pastAffiliations.map(aff => ({
+            _id: aff._id,
+            hospital: aff.hospital,
+            department: aff.department,
+            position: aff.position,
+            from: aff.from,
+            to: aff.to,
+            duration: aff.from && aff.to ?
+              `${Math.round((aff.to - aff.from) / (1000 * 60 * 60 * 24 * 365 * 10)) / 10} years` :
+              'N/A'
+          }))
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching doctor affiliations:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch doctor affiliations',
+        error: error.message
+      });
+    }
+  },
+
+
+  getAffiliationStats: async (req, res) => {
+    try {
+      const totalDoctors = await Doctor.countDocuments();
+
+      const doctorsWithCurrentAffiliations = await Doctor.countDocuments({
+        'hospitalAffiliations': {
+          $elemMatch: { currentlyWorking: true }
+        }
+      });
+
+      const doctorsWithoutCurrentAffiliations = await Doctor.countDocuments({
+        $or: [
+          { 'hospitalAffiliations': { $size: 0 } },
+          {
+            'hospitalAffiliations': {
+              $not: { $elemMatch: { currentlyWorking: true } }
+            }
+          }
+        ]
+      });
+
+      const doctorsWithPastAffiliations = await Doctor.countDocuments({
+        'hospitalAffiliations': {
+          $elemMatch: { currentlyWorking: false }
+        }
+      });
+
+      // Get doctors with multiple current affiliations
+      const doctorsWithMultipleAffiliations = await Doctor.aggregate([
+        {
+          $project: {
+            currentAffiliationsCount: {
+              $size: {
+                $filter: {
+                  input: '$hospitalAffiliations',
+                  as: 'aff',
+                  cond: { $eq: ['$$aff.currentlyWorking', true] }
+                }
+              }
+            }
+          }
+        },
+        {
+          $match: {
+            currentAffiliationsCount: { $gte: 2 }
+          }
+        },
+        {
+          $count: 'count'
+        }
+      ]);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          totalDoctors,
+          doctorsWithCurrentAffiliations,
+          doctorsWithoutCurrentAffiliations,
+          doctorsWithPastAffiliations,
+          doctorsWithMultipleCurrentAffiliations: doctorsWithMultipleAffiliations[0]?.count || 0,
+          percentageWithCurrentAffiliations: totalDoctors > 0 ?
+            Math.round((doctorsWithCurrentAffiliations / totalDoctors) * 100) : 0
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching affiliation stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch statistics',
+        error: error.message
+      });
+    }
+  }
 
 };
 

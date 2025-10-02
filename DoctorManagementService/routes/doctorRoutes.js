@@ -128,7 +128,32 @@ router.get('/doctor/coins-collected',
   protect,
   authorize('doctor'),
   DoctorController.getCoinsCollected
-)
+);
+
+router.get('/affiliations',
+  protect,
+  authorize('admin', 'superadmin'),
+  DoctorController.getDoctorsWithAffiliations
+);
+
+router.get('/hospital/:hospitalId/current', 
+  protect,
+  authorize('hospitaladmin', 'admin'),
+  DoctorController.getDoctorsByHospitalCurrent
+);
+
+router.get('/available/doctors', 
+  protect,
+  authorize('hospitaladmin', 'admin', 'superadmin'),
+  DoctorController.getAvailableDoctors
+);
+
+
+router.get('/:doctorId/affiliations',
+  protect,
+  authorize('doctor', 'admin', 'superadmin'),
+  DoctorController.getDoctorAffiliations
+);
 
 
 

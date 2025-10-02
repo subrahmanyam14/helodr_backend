@@ -2,6 +2,7 @@ const express = require('express');
 const app = express();
 const doctorRoutes = require('./routes/doctorRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
+const affiliationRequestRoutes = require('./routes/affiliationRequestRoutes');
 const connectDB = require('./config/db');
 
 // Middlewares
@@ -11,6 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 // Mount routes
 app.use('/doctors', doctorRoutes);
 app.use('/reviews', reviewRoutes);
+app.use('/affiliation', affiliationRequestRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
