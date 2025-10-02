@@ -186,11 +186,11 @@ function getDistance(coord1, coord2) {
   const R = 6371; // Earth's radius in km
   const dLat = toRad(coord2.lat - coord1.lat);
   const dLon = toRad(coord2.lng - coord1.lng);
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(toRad(coord1.lat)) * Math.cos(toRad(coord2.lat)) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(coord1.lat)) * Math.cos(toRad(coord2.lat)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
   return distance * 1000; // Convert to meters
 }
@@ -232,9 +232,9 @@ const DoctorController = {
       if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Valid latitude and longitude are required' 
+        return res.status(400).json({
+          success: false,
+          message: 'Valid latitude and longitude are required'
         });
       }
 
@@ -242,9 +242,9 @@ const DoctorController = {
       if (!existingUser) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ 
-          success: false, 
-          message: 'User profile does not exist for this Doctor.' 
+        return res.status(400).json({
+          success: false,
+          message: 'User profile does not exist for this Doctor.'
         });
       }
 
@@ -261,9 +261,9 @@ const DoctorController = {
         clinicConsultationFee: clinicConsultationFee || 0,
         followUpFee: followUpFee || 0,
         services: services || [],
-        onlineConsultation: onlineConsultation || { 
-          isAvailable: false, 
-          consultationFee: 0 
+        onlineConsultation: onlineConsultation || {
+          isAvailable: false,
+          consultationFee: 0
         },
         location: {
           type: "Point",
@@ -281,7 +281,7 @@ const DoctorController = {
 
       // Cluster assignment logic using geospatial query
       let assignedCluster = null;
-      
+
       // 1. Find clusters that contain this doctor's location within their radius
       const containingClusters = await Cluster.find({
         location: {
@@ -299,44 +299,44 @@ const DoctorController = {
       // 2. Check which cluster actually contains the doctor (within its radius)
       for (const cluster of containingClusters) {
         const distance = getDistance(
-          { 
-            lat: newDoctor.location.coordinates[1], 
-            lng: newDoctor.location.coordinates[0] 
+          {
+            lat: newDoctor.location.coordinates[1],
+            lng: newDoctor.location.coordinates[0]
           },
-          { 
-            lat: cluster.location.coordinates[1], 
-            lng: cluster.location.coordinates[0] 
+          {
+            lat: cluster.location.coordinates[1],
+            lng: cluster.location.coordinates[0]
           }
         );
-        
+
         if (distance <= cluster.radius) {
           assignedCluster = cluster;
           break;
         }
       }
-      
+
       // 3. If not in any cluster, find nearest active cluster
       if (!assignedCluster) {
         const nearestCluster = await Cluster.findOne({
           isActive: true
         })
-        .sort({
-          location: {
-            $near: {
-              $geometry: {
-                type: "Point",
-                coordinates: newDoctor.location.coordinates
+          .sort({
+            location: {
+              $near: {
+                $geometry: {
+                  type: "Point",
+                  coordinates: newDoctor.location.coordinates
+                }
               }
             }
-          }
-        })
-        .session(session);
+          })
+          .session(session);
 
         if (nearestCluster) {
           assignedCluster = nearestCluster;
         }
       }
-      
+
       // 4. Add doctor to the assigned cluster if found
       if (assignedCluster) {
         // Check if doctor already exists in cluster to prevent duplicates
@@ -375,13 +375,13 @@ const DoctorController = {
           id: assignedCluster._id,
           name: assignedCluster.clusterName,
           distance: assignedCluster ? getDistance(
-            { 
-              lat: newDoctor.location.coordinates[1], 
-              lng: newDoctor.location.coordinates[0] 
+            {
+              lat: newDoctor.location.coordinates[1],
+              lng: newDoctor.location.coordinates[0]
             },
-            { 
-              lat: assignedCluster.location.coordinates[1], 
-              lng: assignedCluster.location.coordinates[0] 
+            {
+              lat: assignedCluster.location.coordinates[1],
+              lng: assignedCluster.location.coordinates[0]
             }
           ) : null
         } : null
@@ -786,7 +786,7 @@ const DoctorController = {
   // Get doctor profile
   getDoctorProfile: async (req, res) => {
     try {
-      const { doctorId } = req.params;      
+      const { doctorId } = req.params;
 
       const doctor = await Doctor.findById(doctorId)
         .populate('user', 'fullName email gender countryCode mobileNumber profilePhoto age')
@@ -1394,94 +1394,94 @@ const DoctorController = {
   },
 
   getRevenueSummary: async (req, res) => {
-  const { doctorId } = req.user;
+    const { doctorId } = req.user;
 
-  try {
-    const wallet = await Wallet.findOne({ doctor: doctorId });
-    if (!wallet) return res.status(404).json({ error: "Wallet not found" });
+    try {
+      const wallet = await Wallet.findOne({ doctor: doctorId });
+      if (!wallet) return res.status(404).json({ error: "Wallet not found" });
 
-    const commissionRate = wallet.commission_rate || 20;
+      const commissionRate = wallet.commission_rate || 20;
 
-    const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const now = new Date();
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-    const calculateRevenue = async (startDate, endDate) => {
-      // Find payments for doctor in date range and status = "captured"
-      const payments = await Payment.find({
-        doctor: doctorId,
-        status: "captured",
-        createdAt: { $gte: startDate, $lt: endDate }
-      }).populate({
-        path: "appointment",
-        select: "status",
-        match: { status: "completed" }  // Only appointments that are completed
+      const calculateRevenue = async (startDate, endDate) => {
+        // Find payments for doctor in date range and status = "captured"
+        const payments = await Payment.find({
+          doctor: doctorId,
+          status: "captured",
+          createdAt: { $gte: startDate, $lt: endDate }
+        }).populate({
+          path: "appointment",
+          select: "status",
+          match: { status: "completed" }  // Only appointments that are completed
+        });
+
+        // Filter payments where appointment was completed
+        const validPayments = payments.filter(p => p.appointment);
+
+        // Sum the doctor's net revenue after commission
+        const gross = validPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const net = gross * (1 - commissionRate / 100);
+        return Math.round(net);
+      };
+
+      const currentRevenue = await calculateRevenue(currentMonthStart, nextMonthStart);
+      const previousRevenue = await calculateRevenue(previousMonthStart, currentMonthStart);
+
+      const growth = previousRevenue > 0
+        ? parseFloat((((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(1))
+        : 0;
+
+      return res.status(200).json({
+        totalRevenue: currentRevenue,
+        previousMonthRevenue: previousRevenue,
+        monthlyGrowth: growth,
       });
+    } catch (error) {
+      console.error("Revenue summary error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  },
 
-      // Filter payments where appointment was completed
-      const validPayments = payments.filter(p => p.appointment);
-
-      // Sum the doctor's net revenue after commission
-      const gross = validPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-      const net = gross * (1 - commissionRate / 100);
-      return Math.round(net);
-    };
-
-    const currentRevenue = await calculateRevenue(currentMonthStart, nextMonthStart);
-    const previousRevenue = await calculateRevenue(previousMonthStart, currentMonthStart);
-
-    const growth = previousRevenue > 0
-      ? parseFloat((((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(1))
-      : 0;
-
-    return res.status(200).json({
-      totalRevenue: currentRevenue,
-      previousMonthRevenue: previousRevenue,
-      monthlyGrowth: growth,
-    });
-  } catch (error) {
-    console.error("Revenue summary error:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
-},
-
-getCoinsCollected: async (req, res) => {
+  getCoinsCollected: async (req, res) => {
     try {
       const doctorId = req.user.doctorId;
-      
+
       // Verify doctor exists
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return res.status(404).json({ success: false, message: 'Doctor not found' });
       }
-      
+
       // Get wallet data
       const wallet = await Wallet.findOne({ doctor: doctorId });
       if (!wallet) {
-        return res.status(404).json({ 
-          success: false, 
+        return res.status(404).json({
+          success: false,
           message: 'Wallet not found. Please contact support.'
         });
       }
-      
+
       // Get today's transactions to calculate daily coins
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       const dailyTransactions = await Transaction.find({
         user: doctor.user,
         type: "doctor_credit",
         status: "completed",
         createdAt: { $gte: today }
       });
-      
+
       // Calculate daily coins
       const dailyCoins = dailyTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
-      
+
       // Default coin goal (can be customized per doctor in the future)
       const coinGoal = 150000;
-      
+
       return res.status(200).json({
         success: true,
         totalCoins: wallet.current_balance,
@@ -1491,12 +1491,59 @@ getCoinsCollected: async (req, res) => {
       });
     } catch (error) {
       console.error('Error in getCoinsCollected:', error);
-      return res.status(500).json({ 
-        success: false, 
+      return res.status(500).json({
+        success: false,
         message: 'An error occurred while fetching coins data'
       });
     }
-  }
+  },
+
+  getHospitalByUserId: async (req, res) => {
+    try {
+      const { id } = req.user;
+
+      // Validate user ID
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid user ID'
+        });
+      }
+
+      // Find hospital by addedBy field
+      const hospital = await Hospital.findOne({ addedBy: id })
+        .populate({
+          path: 'addedBy',
+          select: 'name email role profileImage'
+        })
+        .populate({
+          path: 'doctors',
+          select: 'name specialization experience rating profileImage',
+          match: { isActive: true }
+        });
+
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'No hospital found for this user'
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message: 'Hospital details fetched successfully',
+        hospital: hospital
+      });
+
+    } catch (error) {
+      console.error("Error in getHospitalByUserId: ", error);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching hospital details',
+        error: error.message
+      });
+    }
+  },
 
 
 };

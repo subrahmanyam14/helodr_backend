@@ -65,7 +65,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["patient", "doctor", "admin", "superadmin"],
+      enum: ["patient", "doctor", "hospitaladmin", "admin", "superadmin"],
       default: "patient"
     },
     isEmailVerified: {
@@ -104,22 +104,6 @@ const userSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Doctor"
     },
-    medicalRecords: [{
-      type: {
-        type: String,
-        enum: ["prescription", "report", "image", "other"]
-      },
-      doctorId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Doctor",
-      },
-      date: {
-        type: Date,
-        default: Date.now
-      },
-      url: String,
-      description: String
-    }],
   },
   {
     timestamps: true,

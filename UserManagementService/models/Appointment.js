@@ -61,14 +61,10 @@ const appointmentSchema = new mongoose.Schema({
       enum:["patient", "doctor"]
     }
   }], 
-  medicalRecords: [{
-    type: {
-      type: String,
-      enum: ["prescription", "report", "image", "other"]
-    },
-    url: String,
-    description: String
-  }],
+  healthRecord: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "HealthRecord"
+  },
   prescription: {
     diagnosis: String,
     medicines: [{
@@ -118,10 +114,6 @@ const appointmentSchema = new mongoose.Schema({
         max: 5
       }
     },
-    isAnonymous: {
-      type: Boolean,
-      default: false
-    },
     createdAt: {
       type: Date,
       default: Date.now
@@ -147,14 +139,7 @@ const appointmentSchema = new mongoose.Schema({
     sentAt: Date,
     status: String
   }],
-  followUp: {
-    isRequired: Boolean,
-    date: Date,
-    originalAppointment: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Appointment"
-    }
-  }
+  
 }, {
   timestamps: true,
   toJSON: { virtuals: true },

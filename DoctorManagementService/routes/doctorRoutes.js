@@ -38,8 +38,15 @@ router.post(
 router.post(
   '/hospital',
   protect,
-  authorize('doctor', 'admin'),
+  authorize('hospitaladmin', 'admin'),
   DoctorController.registerHospital
+);
+
+router.get(
+  '/hospital',
+  protect,
+  authorize('hospitaladmin', 'admin'),
+  DoctorController.getHospitalByUserId
 );
 
 // Hospital affiliation routes

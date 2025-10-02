@@ -169,10 +169,6 @@ const doctorSchema = new mongoose.Schema({
 
   // Practice Information
   clinicConsultationFee: {
-    isAvailable: {
-      type: Boolean,
-      default: false
-    },
     consultationFee: {
       type: Number,
       min: 0,
@@ -185,10 +181,6 @@ const doctorSchema = new mongoose.Schema({
   },
   // Online Consultation
   onlineConsultation: {
-    isAvailable: {
-      type: Boolean,
-      default: false
-    },
     consultationFee: {
       type: Number,
       min: 0,
@@ -199,7 +191,6 @@ const doctorSchema = new mongoose.Schema({
       min: 0
     }
   },
-  services: [String],
 
   // Hospital Affiliations
   hospitalAffiliations: [{
@@ -222,56 +213,26 @@ const doctorSchema = new mongoose.Schema({
       type: String,
       default: "India"
     },
-    pinCode: String,
-    coordinates: {
-      type: [Number], // [longitude, latitude]
-      index: "2dsphere"
-    }
+    pinCode: String
   },
-  // Verification
-  verification: {
-    status: {
-      type: String,
-      enum: ["pending", "verified", "rejected"],
-      default: "pending"
-    },
-    documents: [String],
-    verifiedAt: Date
-  },
-
-  verifiedByAdmin: {
-    admin:
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
-    },
-    verifiedAt: Date,
-    comments: String
-  },//todo-add verified by hospitaladmin
-
-  verifiedBySuperAdmin: {
-    superAdmin:
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
-    },
-    verifiedAt: Date,
-    comments: String
-  },   //pikey
 
   isActive: {
     type: Boolean,
     default: false
   },
 
-  averageRating: {
-    type: Number,
-    default: 0
-  },
-
-  totalRatings: {
-    type: Number,
-    default: 0
+  review: {
+    averageRating: {
+      type: Number,
+      min: 0,
+      max: 5,
+      default: 0
+    },
+    count: {
+      type: Number,
+      min: 0,
+      default: 0
+    }
   },
   meetingLink: {
     type: String,
