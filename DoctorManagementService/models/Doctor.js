@@ -236,7 +236,6 @@ const doctorSchema = new mongoose.Schema({
   },
   meetingLink: {
     type: String,
-    required: true
   }
 });
 

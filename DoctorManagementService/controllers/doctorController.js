@@ -207,196 +207,103 @@ const sanitizeRegex = (str) => {
 
 const DoctorController = {
   // Register a new doctor
-  registerDoctor: async (req, res) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
+registerDoctor: async (req, res) => {
+  try {
+    const {
+      title,
+      specializations,
+      registrationNumber,
+      qualifications,
+      experience,
+      languages,
+      bio,
+      clinicConsultationFee,
+      followUpFee,
+      services,
+      onlineConsultation
+    } = req.body;
 
-    try {
-      const {
-        title,
-        specializations,
-        registrationNumber,
-        qualifications,
-        experience,
-        languages,
-        bio,
-        clinicConsultationFee,
-        followUpFee,
-        services,
-        onlineConsultation,
-        latitude,
-        longitude
-      } = req.body;
-
-      // Validate coordinates
-      if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: 'Valid latitude and longitude are required'
-        });
-      }
-
-      const existingUser = await User.findById(req.user.id).session(session);
-      if (!existingUser) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: 'User profile does not exist for this Doctor.'
-        });
-      }
-
-      // Create new doctor
-      const newDoctor = new Doctor({
-        user: req.user.id,
-        title: title || 'Dr.',
-        specializations: specializations || [],
-        registrationNumber,
-        qualifications: qualifications || [],
-        experience: experience || 0,
-        languages: languages || [],
-        bio: bio || '',
-        clinicConsultationFee: clinicConsultationFee || 0,
-        followUpFee: followUpFee || 0,
-        services: services || [],
-        onlineConsultation: onlineConsultation || {
-          isAvailable: false,
-          consultationFee: 0
-        },
-        location: {
-          type: "Point",
-          coordinates: [parseFloat(longitude), parseFloat(latitude)]
-        },
-        verification: {
-          status: 'pending',
-          documents: req.files ? req.files.map(file => file.path) : [],
-          verifiedAt: null
-        },
-        isActive: false
-      });
-
-      await newDoctor.save({ session });
-
-      // Cluster assignment logic using geospatial query
-      let assignedCluster = null;
-
-      // 1. Find clusters that contain this doctor's location within their radius
-      const containingClusters = await Cluster.find({
-        location: {
-          $near: {
-            $geometry: {
-              type: "Point",
-              coordinates: newDoctor.location.coordinates
-            },
-            $maxDistance: 10000 // Search within 10km radius (adjust as needed)
-          }
-        },
-        isActive: true
-      }).session(session);
-
-      // 2. Check which cluster actually contains the doctor (within its radius)
-      for (const cluster of containingClusters) {
-        const distance = getDistance(
-          {
-            lat: newDoctor.location.coordinates[1],
-            lng: newDoctor.location.coordinates[0]
-          },
-          {
-            lat: cluster.location.coordinates[1],
-            lng: cluster.location.coordinates[0]
-          }
-        );
-
-        if (distance <= cluster.radius) {
-          assignedCluster = cluster;
-          break;
-        }
-      }
-
-      // 3. If not in any cluster, find nearest active cluster
-      if (!assignedCluster) {
-        const nearestCluster = await Cluster.findOne({
-          isActive: true
-        })
-          .sort({
-            location: {
-              $near: {
-                $geometry: {
-                  type: "Point",
-                  coordinates: newDoctor.location.coordinates
-                }
-              }
-            }
-          })
-          .session(session);
-
-        if (nearestCluster) {
-          assignedCluster = nearestCluster;
-        }
-      }
-
-      // 4. Add doctor to the assigned cluster if found
-      if (assignedCluster) {
-        // Check if doctor already exists in cluster to prevent duplicates
-        if (!assignedCluster.doctors.includes(req.user.id)) {
-          assignedCluster.doctors.push(req.user.id);
-          await assignedCluster.save({ session });
-        }
-      }
-
-      // Create default settings for the doctor
-      const newSettings = new Settings({
-        user: req.user.id,
-        email_notifications: true,
-        sms_notifications: true,
-        push_notifications: true,
-        auto_withdraw: false,
-        auto_withdraw_threshold: 5000,
-        payment_method: 'bank_transfer'
-      });
-
-      await newSettings.save({ session });
-
-      // Update user with doctor reference
-      existingUser.doctorId = newDoctor._id;
-      await existingUser.save({ session });
-
-      await session.commitTransaction();
-      session.endSession();
-
-      res.status(201).json({
-        success: true,
-        message: 'Doctor registered successfully',
-        doctor: newDoctor,
-        settings: newSettings,
-        cluster: assignedCluster ? {
-          id: assignedCluster._id,
-          name: assignedCluster.clusterName,
-          distance: assignedCluster ? getDistance(
-            {
-              lat: newDoctor.location.coordinates[1],
-              lng: newDoctor.location.coordinates[0]
-            },
-            {
-              lat: assignedCluster.location.coordinates[1],
-              lng: assignedCluster.location.coordinates[0]
-            }
-          ) : null
-        } : null
-      });
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      console.error("Error in registerDoctor: ", error);
-      res.status(500).json({
+    // Check if doctor already exists for this user
+    const existingDoctor = await Doctor.findOne({ user: req.user.id });
+    if (existingDoctor) {
+      return res.status(400).json({
         success: false,
-        message: 'Error registering doctor',
-        error: error.message
+        message: 'Doctor profile already exists for this user',
+        data: existingDoctor
       });
     }
-  },
+
+    const existingUser = await User.findById(req.user.id);
+    if (!existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'User profile does not exist for this Doctor.'
+      });
+    }
+
+    // Create new doctor
+    const newDoctor = new Doctor({
+      user: req.user.id,
+      title: title || 'Dr.',
+      specializations: specializations || [],
+      registrationNumber,
+      qualifications: qualifications || [],
+      experience: experience || 0,
+      languages: languages || [],
+      bio: bio || '',
+      clinicConsultationFee: clinicConsultationFee || 0,
+      followUpFee: followUpFee || 0,
+      services: services || [],
+      onlineConsultation: onlineConsultation || {
+        isAvailable: false,
+        consultationFee: 0
+      },
+      isActive: true
+    });
+
+    await newDoctor.save();
+
+    // Create default settings for the doctor
+    const newSettings = new Settings({
+      user: req.user.id,
+      email_notifications: true,
+      sms_notifications: true,
+      push_notifications: true,
+      auto_withdraw: false,
+      auto_withdraw_threshold: 5000,
+      payment_method: 'bank_transfer'
+    });
+
+    await newSettings.save();
+
+    // Update user with doctor reference
+    existingUser.doctorId = newDoctor._id;
+    await existingUser.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Doctor registered successfully',
+      doctor: newDoctor,
+      settings: newSettings
+    });
+
+  } catch (error) {
+    console.error("Error in registerDoctor: ", error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Doctor profile already exists for this user'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Error registering doctor',
+      error: error.message
+    });
+  }
+},
 
   // Ad d or update hospital affiliations
   addHospitalAffiliation: async (req, res) => {

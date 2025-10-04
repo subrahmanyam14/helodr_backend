@@ -84,19 +84,19 @@ exports.login = async (req, res) => {
         additionData.status = "doctor_details_are_not_added_yet";
         additionData.message = "Please add your doctors details inorder to send the application details to admin for approval.";
       }
-      else if( doctor.hospitalAffiliations === null)
-      {
-        additionData.status = "add_clinic_or_hospital_details_are_not_added";
-        additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
-      }
-      else if(!doctor.verifiedByAdmin){
-        additionData.status = "Pending_for_admin_approval";
-        additionData.message = "Application was waiting for the approval by admin";
-      }
-      else if(!doctor.verifiedBySuperAdmin){
-        additionData.status = "Pending_for_superadmin_approval";
-        additionData.message = "Application was waiting for the approval by superadmin";
-      }
+      // else if( doctor.hospitalAffiliations === null)
+      // {
+      //   additionData.status = "add_clinic_or_hospital_details_are_not_added";
+      //   additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
+      // }
+      // else if(!doctor.verifiedByAdmin){
+      //   additionData.status = "Pending_for_admin_approval";
+      //   additionData.message = "Application was waiting for the approval by admin";
+      // }
+      // else if(!doctor.verifiedBySuperAdmin){
+      //   additionData.status = "Pending_for_superadmin_approval";
+      //   additionData.message = "Application was waiting for the approval by superadmin";
+      // }
       else if( doctor.isActive === false)
       {
         additionData.status = "profile_not_in_active_status";
