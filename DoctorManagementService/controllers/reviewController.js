@@ -1,6 +1,6 @@
 const Appointment = require('../models/Appointment');
 const Notification = require('../models/Notification');
-const Review = require('../models/Review');
+// const Review = require('../models/Review');
 const mongoose = require('mongoose');
 
 /**
@@ -94,7 +94,7 @@ const getDoctorReviewAnalytics = async (req, res) => {
     let dateFilter = {};
     if (startDate && endDate) {
       dateFilter = {
-        createdAt: {
+        'review.createdAt': {
           $gte: new Date(startDate),
           $lte: new Date(endDate)
         }
@@ -104,18 +104,18 @@ const getDoctorReviewAnalytics = async (req, res) => {
       const periodStart = new Date();
       periodStart.setDate(periodStart.getDate() - days);
       dateFilter = {
-        createdAt: { $gte: periodStart }
+        'review.createdAt': { $gte: periodStart }
       };
     }
 
-    // Build match criteria
+    // Build match criteria - only appointments with reviews
     const matchCriteria = {
       doctor: new mongoose.Types.ObjectId(doctorId),
-      status: "approved",
+      'review.rating': { $exists: true, $ne: null },
       ...dateFilter
     };
 
-    const analytics = await Review.aggregate([
+    const analytics = await Appointment.aggregate([
       { $match: matchCriteria },
       {
         $facet: {
@@ -125,9 +125,7 @@ const getDoctorReviewAnalytics = async (req, res) => {
               $group: {
                 _id: null,
                 totalReviews: { $sum: 1 },
-                averageRating: { $avg: "$rating" },
-                totalHelpfulVotes: { $sum: "$helpfulCount" },
-                totalUnhelpfulVotes: { $sum: "$unhelpfulCount" }
+                averageRating: { $avg: "$review.rating" }
               }
             }
           ],
@@ -136,7 +134,7 @@ const getDoctorReviewAnalytics = async (req, res) => {
           ratingDistribution: [
             {
               $group: {
-                _id: "$rating",
+                _id: "$review.rating",
                 count: { $sum: 1 }
               }
             },
@@ -148,25 +146,25 @@ const getDoctorReviewAnalytics = async (req, res) => {
             {
               $group: {
                 _id: null,
-                avgWaitingTime: { $avg: "$aspects.waitingTime" },
-                avgStaffCourteousness: { $avg: "$aspects.staffCourteousness" },
-                avgDoctorKnowledge: { $avg: "$aspects.doctorKnowledge" },
-                avgDoctorFriendliness: { $avg: "$aspects.doctorFriendliness" },
-                avgTreatmentExplanation: { $avg: "$aspects.treatmentExplanation" },
+                avgWaitingTime: { $avg: "$review.aspects.waitingTime" },
+                avgStaffCourteousness: { $avg: "$review.aspects.staffCourteousness" },
+                avgDoctorKnowledge: { $avg: "$review.aspects.doctorKnowledge" },
+                avgDoctorFriendliness: { $avg: "$review.aspects.doctorFriendliness" },
+                avgTreatmentExplanation: { $avg: "$review.aspects.treatmentExplanation" },
                 waitingTimeCount: { 
-                  $sum: { $cond: [{ $ne: ["$aspects.waitingTime", null] }, 1, 0] }
+                  $sum: { $cond: [{ $ne: ["$review.aspects.waitingTime", null] }, 1, 0] }
                 },
                 staffCourtCount: { 
-                  $sum: { $cond: [{ $ne: ["$aspects.staffCourteousness", null] }, 1, 0] }
+                  $sum: { $cond: [{ $ne: ["$review.aspects.staffCourteousness", null] }, 1, 0] }
                 },
                 doctorKnowCount: { 
-                  $sum: { $cond: [{ $ne: ["$aspects.doctorKnowledge", null] }, 1, 0] }
+                  $sum: { $cond: [{ $ne: ["$review.aspects.doctorKnowledge", null] }, 1, 0] }
                 },
                 doctorFriendCount: { 
-                  $sum: { $cond: [{ $ne: ["$aspects.doctorFriendliness", null] }, 1, 0] }
+                  $sum: { $cond: [{ $ne: ["$review.aspects.doctorFriendliness", null] }, 1, 0] }
                 },
                 treatmentExpCount: { 
-                  $sum: { $cond: [{ $ne: ["$aspects.treatmentExplanation", null] }, 1, 0] }
+                  $sum: { $cond: [{ $ne: ["$review.aspects.treatmentExplanation", null] }, 1, 0] }
                 }
               }
             }
@@ -177,12 +175,11 @@ const getDoctorReviewAnalytics = async (req, res) => {
             {
               $group: {
                 _id: {
-                  year: { $year: "$createdAt" },
-                  month: { $month: "$createdAt" }
+                  year: { $year: "$review.createdAt" },
+                  month: { $month: "$review.createdAt" }
                 },
                 reviewCount: { $sum: 1 },
-                averageRating: { $avg: "$rating" },
-                helpfulVotes: { $sum: "$helpfulCount" }
+                averageRating: { $avg: "$review.rating" }
               }
             },
             { $sort: { "_id.year": 1, "_id.month": 1 } },
@@ -191,7 +188,7 @@ const getDoctorReviewAnalytics = async (req, res) => {
 
           // Recent reviews sample
           recentReviews: [
-            { $sort: { createdAt: -1 } },
+            { $sort: { 'review.createdAt': -1 } },
             { $limit: 10 },
             {
               $lookup: {
@@ -203,20 +200,15 @@ const getDoctorReviewAnalytics = async (req, res) => {
             },
             {
               $project: {
-                rating: 1,
-                feedback: 1,
-                aspects: 1,
-                isAnonymous: 1,
-                helpfulCount: 1,
-                unhelpfulCount: 1,
-                createdAt: 1,
-                patientName: {
-                  $cond: [
-                    { $eq: ["$isAnonymous", true] },
-                    "Anonymous",
-                    { $arrayElemAt: ["$patientInfo.name", 0] }
-                  ]
-                }
+                appointmentId: "$_id",
+                appointmentDate: "$date",
+                appointmentType: "$appointmentType",
+                rating: "$review.rating",
+                feedback: "$review.feedback",
+                aspects: "$review.aspects",
+                createdAt: "$review.createdAt",
+                patientName: { $arrayElemAt: ["$patientInfo.fullName", 0] },
+                patientEmail: { $arrayElemAt: ["$patientInfo.email", 0] }
               }
             }
           ],
@@ -229,12 +221,12 @@ const getDoctorReviewAnalytics = async (req, res) => {
                   date: {
                     $dateToString: {
                       format: "%Y-%m-%d",
-                      date: "$createdAt"
+                      date: "$review.createdAt"
                     }
                   }
                 },
                 count: { $sum: 1 },
-                avgRating: { $avg: "$rating" }
+                avgRating: { $avg: "$review.rating" }
               }
             },
             { $sort: { "_id.date": 1 } },
@@ -252,12 +244,7 @@ const getDoctorReviewAnalytics = async (req, res) => {
       data: {
         overview: {
           totalReviews: result.overallStats[0]?.totalReviews || 0,
-          averageRating: parseFloat((result.overallStats[0]?.averageRating || 0).toFixed(2)),
-          totalHelpfulVotes: result.overallStats[0]?.totalHelpfulVotes || 0,
-          totalUnhelpfulVotes: result.overallStats[0]?.totalUnhelpfulVotes || 0,
-          helpfulnessRatio: result.overallStats[0]?.totalHelpfulVotes > 0 ? 
-            parseFloat((result.overallStats[0].totalHelpfulVotes / 
-            (result.overallStats[0].totalHelpfulVotes + result.overallStats[0].totalUnhelpfulVotes) * 100).toFixed(2)) : 0
+          averageRating: parseFloat((result.overallStats[0]?.averageRating || 0).toFixed(2))
         },
         
         ratingDistribution: result.ratingDistribution.reduce((acc, item) => {
@@ -291,8 +278,7 @@ const getDoctorReviewAnalytics = async (req, res) => {
         monthlyTrends: result.monthlyTrends.map(trend => ({
           month: `${trend._id.year}-${String(trend._id.month).padStart(2, '0')}`,
           reviewCount: trend.reviewCount,
-          averageRating: parseFloat(trend.averageRating.toFixed(2)),
-          helpfulVotes: trend.helpfulVotes
+          averageRating: parseFloat(trend.averageRating.toFixed(2))
         })),
         
         dailyTrends: result.dailyTrends.map(trend => ({
@@ -321,7 +307,6 @@ const getDoctorReviewAnalytics = async (req, res) => {
     });
   }
 };
-
 /**
  * @desc    Get reviews for a doctor
  * @route   GET /api/reviews/doctor/:doctorId

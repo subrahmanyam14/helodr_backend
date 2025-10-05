@@ -57,56 +57,6 @@ exports.uploadHealthRecord = async (req, res) => {
             });
         }
 
-        // Check if file exists
-        // if (!req.file) {
-        //     return res.status(400).json({
-        //         success: false,
-        //         message: "Health record file is required"
-        //     });
-        // }
-
-        // let healthRecordUrl = null;
-
-        // try {
-        //     const formData = new FormData();
-
-        //     // Handle single file (multer typically gives us the file directly)
-        //     const healthRecordFile = req.file;
-
-        //     // Append file to form data
-        //     formData.append('file', healthRecordFile.buffer, {
-        //         filename: healthRecordFile.originalname,
-        //         contentType: healthRecordFile.mimetype
-        //     });
-
-        //     // Upload files to Storage Service
-        //     const uploadResponse = await axios.post(
-        //         `${transportStorageServiceUrl}/storage/upload`,
-        //         formData,
-        //         { 
-        //             headers: { 
-        //                 ...formData.getHeaders(), 
-        //                 'Authorization': `Bearer ${req.token}` 
-        //             },
-        //             maxContentLength: Infinity,
-        //             maxBodyLength: Infinity
-        //         }
-        //     );
-
-        //     if (uploadResponse.data && uploadResponse.data.url) {
-        //         healthRecordUrl = uploadResponse.data.url;
-        //     } else {
-        //         throw new Error('No URL returned from storage service');
-        //     }
-        // } catch (error) {
-        //     console.error('File upload error:', error);
-        //     return res.status(500).json({
-        //         success: false,
-        //         message: 'File upload failed',
-        //         error: error.response ? error.response.data : error.message
-        //     });
-        // }
-
         // Create and save health record
         const healthRecord = new HealthRecords({
             user_id: req.user.id,

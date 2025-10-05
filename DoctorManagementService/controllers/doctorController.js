@@ -8,6 +8,8 @@ const Payment = require("../models/Payment");
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Transaction = require("../models/Transaction");
+const Appointment = require("../models/Appointment");
+const UpcomingEarnings = require("../models/UpcomingEarnings");
 const jwt = require('jsonwebtoken');
 
 const specializationEnum = [
@@ -2098,7 +2100,7 @@ const DoctorController = {
   },
 
 
-getHospitalDoctorCounts: async (req, res) => {
+  getHospitalDoctorCounts: async (req, res) => {
     try {
       const { hospitalId } = req.user;
 
@@ -2195,6 +2197,1345 @@ getHospitalDoctorCounts: async (req, res) => {
         success: false,
         message: 'Internal server error while fetching counts',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
+
+  getDoctorById: async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // Validate ID format
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid doctor ID format'
+        });
+      }
+
+      // Find doctor and populate all necessary fields
+      const doctor = await Doctor.findById(id)
+        .populate('user', 'fullName profilePhoto email mobileNumber')
+        .populate({
+          path: 'hospitalAffiliations.hospital',
+          select: 'name city type address contact photos statistics'
+        })
+        .lean(); // Convert to plain JavaScript object for better performance
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor not found'
+        });
+      }
+
+      // Format the response to match your UI structure
+      const formattedDoctor = {
+        _id: doctor._id,
+        user: doctor.user?._id,
+        fullName: doctor.fullName || doctor.user?.fullName,
+        title: doctor.title,
+        specializations: doctor.specializations,
+        registrationNumber: doctor.registrationNumber,
+        qualifications: doctor.qualifications,
+        experience: doctor.experience,
+        languages: doctor.languages,
+        bio: doctor.bio,
+        clinicConsultationFee: doctor.clinicConsultationFee,
+        onlineConsultation: doctor.onlineConsultation,
+        hospitalAffiliations: doctor.hospitalAffiliations.map(affiliation => ({
+          hospital: {
+            _id: affiliation.hospital?._id,
+            name: affiliation.hospital?.name,
+            city: affiliation.hospital?.address?.city,
+            type: affiliation.hospital?.type,
+            contact: affiliation.hospital?.contact,
+            statistics: affiliation.hospital?.statistics
+          },
+          department: affiliation.department,
+          position: affiliation.position,
+          from: affiliation.from,
+          to: affiliation.to,
+          currentlyWorking: affiliation.currentlyWorking
+        })),
+        address: doctor.address,
+        isActive: doctor.isActive,
+        review: {
+          averageRating: doctor.review?.averageRating || 0,
+          count: doctor.review?.count || 0
+        },
+        meetingLink: doctor.meetingLink,
+        services: doctor.services || []
+      };
+
+      res.status(200).json({
+        success: true,
+        data: formattedDoctor
+      });
+
+    } catch (error) {
+      console.error('Error fetching doctor:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error while fetching doctor details',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
+
+  getHospitalDashboardStats: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+
+      // Validate hospital ID
+      if (!hospitalId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Hospital ID is required'
+        });
+      }
+
+      // Check if hospital exists
+      const hospital = await Hospital.findById(hospitalId);
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Get all doctors affiliated with this hospital (currently working)
+      const affiliatedDoctors = await Doctor.find({
+        'hospitalAffiliations.hospital': hospitalId,
+        'hospitalAffiliations.currentlyWorking': true,
+        isActive: true
+      }).select('_id');
+
+      const doctorIds = affiliatedDoctors.map(doc => doc._id);
+
+      // Get total patients (unique patients who have appointments with doctors from this hospital)
+      const totalPatientsResult = await Appointment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds },
+            status: { $in: ['confirmed', 'completed'] }
+          }
+        },
+        {
+          $group: {
+            _id: '$patient'
+          }
+        },
+        {
+          $count: 'totalPatients'
+        }
+      ]);
+
+      // Get appointment statistics
+      const appointmentStats = await Appointment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalAppointments: { $sum: 1 },
+            pendingAppointments: {
+              $sum: {
+                $cond: [{ $eq: ['$status', 'pending'] }, 1, 0]
+              }
+            },
+            completedAppointments: {
+              $sum: {
+                $cond: [{ $eq: ['$status', 'completed'] }, 1, 0]
+              }
+            }
+          }
+        }
+      ]);
+
+      // Get revenue statistics from payments
+      const revenueStats = await Payment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds },
+            status: 'captured'
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$amount' }
+          }
+        }
+      ]);
+
+      // Get rating statistics from appointments with reviews
+      const ratingStats = await Appointment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds },
+            'review.rating': { $exists: true, $ne: null }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            averageRating: { $avg: '$review.rating' },
+            totalReviews: { $sum: 1 }
+          }
+        }
+      ]);
+
+      // If no rating data found, use doctor's review data as fallback
+      let doctorRatingStats = { averageRating: 0, totalReviews: 0 };
+      if (doctorIds.length > 0) {
+        doctorRatingStats = await Doctor.aggregate([
+          {
+            $match: {
+              _id: { $in: doctorIds },
+              'review.count': { $gt: 0 }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              averageRating: { $avg: '$review.averageRating' },
+              totalReviews: { $sum: '$review.count' }
+            }
+          }
+        ]);
+      }
+
+      // Prepare response data
+      const dashboardData = {
+        totalDoctors: doctorIds.length,
+        totalPatients: totalPatientsResult.length > 0 ? totalPatientsResult[0].totalPatients : 0,
+        totalAppointments: appointmentStats.length > 0 ? appointmentStats[0].totalAppointments : 0,
+        totalRevenue: revenueStats.length > 0 ? revenueStats[0].totalRevenue : 0,
+        pendingAppointments: appointmentStats.length > 0 ? appointmentStats[0].pendingAppointments : 0,
+        completedAppointments: appointmentStats.length > 0 ? appointmentStats[0].completedAppointments : 0,
+        averageRating: 0,
+        totalReviews: 0
+      };
+
+      // Use appointment reviews if available, otherwise use doctor reviews
+      if (ratingStats.length > 0) {
+        dashboardData.averageRating = parseFloat(ratingStats[0].averageRating.toFixed(2));
+        dashboardData.totalReviews = ratingStats[0].totalReviews;
+      } else if (doctorRatingStats.length > 0) {
+        dashboardData.averageRating = parseFloat(doctorRatingStats[0].averageRating.toFixed(2));
+        dashboardData.totalReviews = doctorRatingStats[0].totalReviews;
+      }
+
+      res.status(200).json({
+        success: true,
+        data: dashboardData,
+        message: 'Hospital dashboard statistics retrieved successfully'
+      });
+
+    } catch (error) {
+      console.error('Error fetching hospital dashboard stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+        error: error.message
+      });
+    }
+  },
+
+  getHospitalDashboard: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+
+      // Verify hospital exists
+      const hospital = await Hospital.findById(hospitalId);
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Get doctors affiliated with this hospital
+      const doctors = await Doctor.find({
+        'hospitalAffiliations.hospital': hospitalId,
+        isActive: true
+      }).populate('user', 'fullName');
+
+      const doctorIds = doctors.map(d => d._id);
+
+      // Get date ranges
+      const now = new Date();
+      const startOfToday = new Date(now.setHours(0, 0, 0, 0));
+      const endOfToday = new Date(now.setHours(23, 59, 59, 999));
+      const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+      // Revenue Data - Weekly
+      const weeklyRevenue = await Payment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds },
+            status: 'captured',
+            createdAt: { $gte: startOfWeek }
+          }
+        },
+        {
+          $group: {
+            _id: { $dayOfWeek: '$createdAt' },
+            revenue: { $sum: '$amount' }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]);
+
+      const dayMap = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const weekly = dayMap.map((day, index) => {
+        const data = weeklyRevenue.find(r => r._id === index + 1);
+        return { day, revenue: data ? data.revenue : 0 };
+      });
+
+      // Revenue Data - Monthly
+      const monthlyRevenue = await Payment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds },
+            status: 'captured',
+            createdAt: { $gte: startOfYear }
+          }
+        },
+        {
+          $group: {
+            _id: { $month: '$createdAt' },
+            revenue: { $sum: '$amount' }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]);
+
+      const monthMap = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthly = monthMap.map((month, index) => {
+        const data = monthlyRevenue.find(r => r._id === index + 1);
+        return { month, revenue: data ? data.revenue : 0 };
+      });
+
+      // Revenue Data - Yearly
+      const yearlyRevenue = await Payment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds },
+            status: 'captured'
+          }
+        },
+        {
+          $group: {
+            _id: { $year: '$createdAt' },
+            revenue: { $sum: '$amount' }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]);
+
+      const yearly = yearlyRevenue.map(r => ({
+        year: r._id.toString(),
+        revenue: r.revenue
+      }));
+
+      // Specialty Distribution
+      const specialtyDistribution = doctors.reduce((acc, doctor) => {
+        doctor.specializations.forEach(spec => {
+          const existing = acc.find(s => s.name === spec);
+          if (existing) {
+            existing.value++;
+          } else {
+            acc.push({ name: spec, value: 1 });
+          }
+        });
+        return acc;
+      }, []);
+
+      const colors = ['#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#6366f1', '#ef4444'];
+      specialtyDistribution.forEach((item, index) => {
+        item.color = colors[index % colors.length];
+      });
+
+      // Appointment Stats - Today
+      const todayAppointments = await Appointment.find({
+        doctor: { $in: doctorIds },
+        date: { $gte: startOfToday, $lte: endOfToday }
+      });
+
+      const todayStats = {
+        total: todayAppointments.length,
+        completed: todayAppointments.filter(a => a.status === 'completed').length,
+        pending: todayAppointments.filter(a => a.status === 'pending' || a.status === 'confirmed').length,
+        cancelled: todayAppointments.filter(a => a.status === 'cancelled').length
+      };
+
+      // Appointment Stats - Week
+      const weekAppointments = await Appointment.find({
+        doctor: { $in: doctorIds },
+        date: { $gte: startOfWeek }
+      });
+
+      const weekStats = {
+        total: weekAppointments.length,
+        completed: weekAppointments.filter(a => a.status === 'completed').length,
+        pending: weekAppointments.filter(a => a.status === 'pending' || a.status === 'confirmed').length,
+        cancelled: weekAppointments.filter(a => a.status === 'cancelled').length
+      };
+
+      // Top Doctors by Revenue (Last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const doctorRevenue = await Payment.aggregate([
+        {
+          $match: {
+            doctor: { $in: doctorIds },
+            status: 'captured',
+            createdAt: { $gte: thirtyDaysAgo }
+          }
+        },
+        {
+          $group: {
+            _id: '$doctor',
+            monthlyRevenue: { $sum: '$amount' }
+          }
+        },
+        { $sort: { monthlyRevenue: -1 } },
+        { $limit: 5 }
+      ]);
+
+      // If no revenue data, still show top 5 doctors by rating
+      let topDoctors = [];
+
+      if (doctorRevenue.length > 0) {
+        topDoctors = doctorRevenue.map((rev) => {
+          const doctor = doctors.find(d => d._id.toString() === rev._id.toString());
+          if (doctor) {
+            return {
+              _id: doctor._id,
+              fullName: doctor.fullName,
+              specializations: doctor.specializations,
+              averageRating: doctor.review.averageRating,
+              totalRatings: doctor.review.count,
+              experience: doctor.experience,
+              monthlyRevenue: rev.monthlyRevenue,
+              onlineConsultation: {
+                isAvailable: doctor.onlineConsultation.consultationFee > 0,
+                consultationFee: doctor.onlineConsultation.consultationFee
+              },
+              clinicConsultation: {
+                isAvailable: doctor.clinicConsultationFee.consultationFee > 0,
+                consultationFee: doctor.clinicConsultationFee.consultationFee
+              }
+            };
+          }
+          return null;
+        }).filter(d => d !== null);
+      } else {
+        // Fallback: Show top 5 doctors by rating if no revenue data
+        const sortedDoctors = doctors
+          .sort((a, b) => b.review.averageRating - a.review.averageRating)
+          .slice(0, 5);
+
+        topDoctors = sortedDoctors.map(doctor => ({
+          _id: doctor._id,
+          fullName: doctor.fullName,
+          specializations: doctor.specializations,
+          averageRating: doctor.review.averageRating,
+          totalRatings: doctor.review.count,
+          experience: doctor.experience,
+          monthlyRevenue: 0,
+          onlineConsultation: {
+            isAvailable: doctor.onlineConsultation.consultationFee > 0,
+            consultationFee: doctor.onlineConsultation.consultationFee
+          },
+          clinicConsultation: {
+            isAvailable: doctor.clinicConsultationFee.consultationFee > 0,
+            consultationFee: doctor.clinicConsultationFee.consultationFee
+          }
+        }));
+      }
+
+      // Today's Appointments
+      const todayAppointmentsList = await Appointment.find({
+        doctor: { $in: doctorIds },
+        date: { $gte: startOfToday, $lte: endOfToday }
+      })
+        .populate('patient', 'fullName')
+        .populate('doctor', 'fullName specializations')
+        .sort({ 'slot.startTime': 1 })
+        .limit(10);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          revenueData: {
+            weekly,
+            monthly,
+            yearly
+          },
+          specialtyDistribution,
+          appointmentStats: {
+            today: todayStats,
+            week: weekStats
+          },
+          topDoctors,
+          todayAppointments: todayAppointmentsList
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching hospital dashboard:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch dashboard data',
+        error: error.message
+      });
+    }
+  },
+
+
+  getHospitalPatients: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+
+      // Pagination parameters
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+
+      // Search parameter
+      const search = req.query.search || '';
+
+      // Filter parameters
+      const statusFilter = req.query.status || '';
+      const genderFilter = req.query.gender || '';
+
+      // Sort parameters
+      const sortField = req.query.sortField || 'fullName';
+      const sortDirection = req.query.sortDirection === 'desc' ? -1 : 1;
+
+      // Verify hospital exists
+      const hospital = await Hospital.findById(hospitalId);
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Get doctors affiliated with this hospital
+      const doctors = await Doctor.find({
+        'hospitalAffiliations.hospital': hospitalId,
+        isActive: true
+      });
+
+      const doctorIds = doctors.map(d => d._id);
+
+      // Build patient search query
+      let patientQuery = {};
+      if (search) {
+        patientQuery.$or = [
+          { fullName: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+          { mobileNumber: { $regex: search, $options: 'i' } },
+          { city: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      if (genderFilter) {
+        patientQuery.gender = genderFilter;
+      }
+
+      // Get all appointments for these doctors
+      let appointmentQuery = { doctor: { $in: doctorIds } };
+
+      if (statusFilter) {
+        appointmentQuery.status = statusFilter;
+      }
+
+      const appointments = await Appointment.find(appointmentQuery)
+        .populate('patient', 'fullName email mobileNumber gender dateOfBirth city state country')
+        .populate('doctor', 'fullName specializations')
+        .sort({ date: -1 });
+
+      // Group appointments by patient
+      const patientMap = new Map();
+
+      appointments.forEach(appointment => {
+        if (!appointment.patient) return;
+
+        const patientId = appointment.patient._id.toString();
+
+        if (!patientMap.has(patientId)) {
+          patientMap.set(patientId, {
+            _id: appointment.patient._id,
+            fullName: appointment.patient.fullName,
+            email: appointment.patient.email,
+            mobileNumber: appointment.patient.mobileNumber,
+            gender: appointment.patient.gender,
+            dateOfBirth: appointment.patient.dateOfBirth,
+            city: appointment.patient.city,
+            state: appointment.patient.state,
+            country: appointment.patient.country,
+            appointments: []
+          });
+        }
+
+        patientMap.get(patientId).appointments.push({
+          _id: appointment._id,
+          date: appointment.date,
+          status: appointment.status,
+          doctor: appointment.doctor.fullName,
+          appointmentType: appointment.appointmentType,
+          reason: appointment.reason,
+          slot: appointment.slot
+        });
+      });
+
+      // Convert map to array
+      let patients = Array.from(patientMap.values());
+
+      // Apply patient-level filters
+      if (search) {
+        patients = patients.filter(patient => {
+          const searchLower = search.toLowerCase();
+          return (
+            patient.fullName?.toLowerCase().includes(searchLower) ||
+            patient.email?.toLowerCase().includes(searchLower) ||
+            patient.mobileNumber?.includes(search) ||
+            patient.city?.toLowerCase().includes(searchLower) ||
+            patient.appointments.some(apt =>
+              apt.reason?.toLowerCase().includes(searchLower)
+            )
+          );
+        });
+      }
+
+      if (genderFilter) {
+        patients = patients.filter(patient => patient.gender === genderFilter);
+      }
+
+      if (statusFilter) {
+        patients = patients.filter(patient =>
+          patient.appointments.some(apt => apt.status === statusFilter)
+        );
+      }
+
+      // Apply sorting
+      patients.sort((a, b) => {
+        let aValue, bValue;
+
+        if (sortField === 'appointmentDate') {
+          aValue = a.appointments[0]?.date || new Date(0);
+          bValue = b.appointments[0]?.date || new Date(0);
+        } else if (sortField === 'appointmentStatus') {
+          aValue = a.appointments[0]?.status || '';
+          bValue = b.appointments[0]?.status || '';
+        } else if (sortField === 'reason') {
+          aValue = a.appointments[0]?.reason || '';
+          bValue = b.appointments[0]?.reason || '';
+        } else {
+          aValue = a[sortField] || '';
+          bValue = b[sortField] || '';
+        }
+
+        if (aValue < bValue) return -1 * sortDirection;
+        if (aValue > bValue) return 1 * sortDirection;
+        return 0;
+      });
+
+      // Get total count before pagination
+      const totalPatients = patients.length;
+      const totalPages = Math.ceil(totalPatients / limit);
+
+      // Apply pagination
+      const paginatedPatients = patients.slice(skip, skip + limit);
+
+      res.status(200).json({
+        success: true,
+        data: paginatedPatients,
+        pagination: {
+          currentPage: page,
+          totalPages: totalPages,
+          totalPatients: totalPatients,
+          patientsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching hospital patients:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch patients data',
+        error: error.message
+      });
+    }
+  },
+  getHospitalAppointments: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+
+      // Pagination parameters
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 8;
+      const skip = (page - 1) * limit;
+
+      // Search parameter
+      const search = req.query.search || '';
+
+      // Filter parameters
+      const statusFilter = req.query.status || 'all';
+      const typeFilter = req.query.type || 'all';
+
+      // Sort parameters
+      const sortField = req.query.sortField || 'date';
+      const sortDirection = req.query.sortDirection === 'asc' ? 1 : -1;
+
+      // Verify hospital exists
+      const hospital = await Hospital.findById(hospitalId);
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Get doctors affiliated with this hospital
+      const doctors = await Doctor.find({
+        'hospitalAffiliations.hospital': hospitalId,
+        isActive: true
+      });
+
+      const doctorIds = doctors.map(d => d._id);
+
+      // Build query
+      let query = { doctor: { $in: doctorIds } };
+
+      // Apply status filter
+      if (statusFilter !== 'all') {
+        query.status = statusFilter;
+      }
+
+      // Apply type filter
+      if (typeFilter !== 'all') {
+        query.appointmentType = typeFilter;
+      }
+
+      // Apply search filter
+      if (search) {
+        const matchingPatients = await require('../models/User').find({
+          $or: [
+            { fullName: { $regex: search, $options: 'i' } },
+            { mobileNumber: { $regex: search, $options: 'i' } }
+          ]
+        }).select('_id');
+
+        const matchingDoctors = await Doctor.find({
+          fullName: { $regex: search, $options: 'i' }
+        }).select('_id');
+
+        query.$or = [
+          { patient: { $in: matchingPatients.map(p => p._id) } },
+          { doctor: { $in: matchingDoctors.map(d => d._id) } },
+          { reason: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      // Build sort object
+      let sortObj = {};
+      if (sortField === 'date') {
+        sortObj.date = sortDirection;
+      } else if (sortField === 'patient') {
+        sortObj['patient.fullName'] = sortDirection;
+      } else if (sortField === 'doctor') {
+        sortObj['doctor.fullName'] = sortDirection;
+      } else if (sortField === 'status') {
+        sortObj.status = sortDirection;
+      } else {
+        sortObj.date = -1; // Default sort by date descending
+      }
+
+      // Get total count
+      const totalAppointments = await Appointment.countDocuments(query);
+
+      // Get appointments with pagination
+      const appointments = await Appointment.find(query)
+        .populate('patient', 'fullName email mobileNumber dateOfBirth bloodGroup addressLine1 city state pinCode')
+        .populate('doctor', 'fullName specializations registrationNumber experience qualifications clinicConsultationFee onlineConsultation')
+        .populate('payment', 'amount status')
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limit);
+
+      // Calculate statistics for all filtered appointments (not just current page)
+      const allFilteredAppointments = await Appointment.find(query);
+
+      const stats = {
+        total: allFilteredAppointments.length,
+        clinic: allFilteredAppointments.filter(a => a.appointmentType === 'clinic').length,
+        video: allFilteredAppointments.filter(a => a.appointmentType === 'video').length,
+        pending: allFilteredAppointments.filter(a => a.status === 'pending').length,
+        completed: allFilteredAppointments.filter(a => a.status === 'completed').length,
+        cancelled: allFilteredAppointments.filter(a => a.status === 'cancelled').length,
+        rescheduled: allFilteredAppointments.filter(a => a.status === 'rescheduled').length
+      };
+
+      // Format appointments data
+      const formattedAppointments = appointments.map(appointment => ({
+        _id: appointment._id,
+        patient: {
+          _id: appointment.patient._id,
+          fullName: appointment.patient.fullName,
+          email: appointment.patient.email,
+          mobileNumber: appointment.patient.mobileNumber,
+          dateOfBirth: appointment.patient.dateOfBirth,
+          bloodGroup: appointment.patient.bloodGroup,
+          addressLine1: appointment.patient.addressLine1,
+          city: appointment.patient.city,
+          state: appointment.patient.state,
+          pinCode: appointment.patient.pinCode
+        },
+        doctor: {
+          _id: appointment.doctor._id,
+          fullName: appointment.doctor.fullName,
+          specializations: appointment.doctor.specializations,
+          registrationNumber: appointment.doctor.registrationNumber,
+          experience: appointment.doctor.experience,
+          qualifications: appointment.doctor.qualifications,
+          clinicConsultationFee: appointment.doctor.clinicConsultationFee,
+          onlineConsultation: appointment.doctor.onlineConsultation,
+          averageRating: appointment.doctor.review?.averageRating || 0,
+          totalRatings: appointment.doctor.review?.count || 0
+        },
+        appointmentType: appointment.appointmentType,
+        date: appointment.date,
+        slot: appointment.slot,
+        reason: appointment.reason,
+        status: appointment.status,
+        payment: appointment.payment ? {
+          _id: appointment.payment._id,
+          amount: appointment.payment.amount,
+          status: appointment.payment.status
+        } : null,
+        medicalRecords: appointment.medicalRecords || [],
+        prescription: appointment.prescription || null,
+        review: appointment.review || null
+      }));
+
+      const totalPages = Math.ceil(totalAppointments / limit);
+
+      res.status(200).json({
+        success: true,
+        data: formattedAppointments,
+        stats,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalAppointments,
+          appointmentsPerPage: limit,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching hospital appointments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch appointments data',
+        error: error.message
+      });
+    }
+  },
+
+  getHospitalReviews: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+
+      // Pagination parameters
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+
+      // Search and filter parameters
+      const searchTerm = req.query.search || '';
+      const sortBy = req.query.sortBy || 'createdAt';
+      const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+
+      // Find all doctors affiliated with this hospital
+      const hospitalDoctors = await Doctor.find({
+        'hospitalAffiliations.hospital': hospitalId
+      }).select('_id');
+
+      const doctorIds = hospitalDoctors.map(doc => doc._id);
+
+      if (doctorIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            reviews: [],
+            pagination: {
+              currentPage: page,
+              totalPages: 0,
+              totalReviews: 0,
+              limit,
+              hasNextPage: false,
+              hasPrevPage: false
+            },
+            statistics: {
+              totalReviews: 0,
+              averageRating: 0,
+              verifiedConsultations: 0
+            }
+          }
+        });
+      }
+
+      // Build query for appointments with reviews
+      let query = {
+        doctor: { $in: doctorIds },
+        'review.rating': { $exists: true, $ne: null }
+      };
+
+      // Add search functionality
+      if (searchTerm) {
+        const searchRegex = new RegExp(searchTerm, 'i');
+
+        // Find matching doctors or patients
+        const matchingDoctors = await Doctor.find({
+          _id: { $in: doctorIds },
+          $or: [
+            { fullName: searchRegex },
+            { specializations: searchRegex }
+          ]
+        }).select('_id');
+
+        const matchingPatients = await User.find({
+          fullName: searchRegex
+        }).select('_id');
+
+        query.$or = [
+          { doctor: { $in: matchingDoctors.map(d => d._id) } },
+          { patient: { $in: matchingPatients.map(p => p._id) } },
+          { 'review.feedback': searchRegex }
+        ];
+      }
+
+      // Get total count for pagination
+      const totalReviews = await Appointment.countDocuments(query);
+
+      // Build sort object
+      let sortObj = {};
+      if (sortBy === 'rating') {
+        sortObj['review.rating'] = sortOrder;
+      } else if (sortBy === 'createdAt') {
+        sortObj['review.createdAt'] = sortOrder;
+      } else if (sortBy === 'doctor.fullName') {
+        sortObj = {}; // Will handle after population
+      } else if (sortBy === 'patient.fullName') {
+        sortObj = {}; // Will handle after population
+      } else {
+        sortObj['review.createdAt'] = -1; // Default sort
+      }
+
+      // Fetch appointments with reviews
+      let appointments = await Appointment.find(query)
+        .populate({
+          path: 'doctor',
+          select: 'fullName specializations'
+        })
+        .populate({
+          path: 'patient',
+          select: 'fullName'
+        })
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      // Manual sorting for populated fields if needed
+      if (sortBy === 'doctor.fullName' || sortBy === 'patient.fullName') {
+        appointments.sort((a, b) => {
+          let aVal, bVal;
+          if (sortBy === 'doctor.fullName') {
+            aVal = a.doctor?.fullName || '';
+            bVal = b.doctor?.fullName || '';
+          } else {
+            aVal = a.patient?.fullName || '';
+            bVal = b.patient?.fullName || '';
+          }
+          return sortOrder === 1
+            ? aVal.localeCompare(bVal)
+            : bVal.localeCompare(aVal);
+        });
+      }
+
+      // Transform data to match frontend format
+      const reviews = appointments.map(appointment => ({
+        _id: appointment._id.toString(),
+        appointment: appointment._id.toString(),
+        patient: {
+          _id: appointment.patient?._id?.toString() || '',
+          fullName: appointment.patient?.fullName || 'Anonymous'
+        },
+        doctor: {
+          _id: appointment.doctor?._id?.toString() || '',
+          fullName: appointment.doctor?.fullName || 'Unknown',
+          specializations: appointment.doctor?.specializations || []
+        },
+        rating: appointment.review.rating,
+        feedback: appointment.review.feedback || '',
+        aspects: {
+          waitingTime: appointment.review.aspects?.waitingTime || 0,
+          staffCourteousness: appointment.review.aspects?.staffCourteousness || 0,
+          doctorKnowledge: appointment.review.aspects?.doctorKnowledge || 0,
+          doctorFriendliness: appointment.review.aspects?.doctorFriendliness || 0,
+          treatmentExplanation: appointment.review.aspects?.treatmentExplanation || 0
+        },
+        isVerifiedConsultation: appointment.status === 'completed',
+        helpfulCount: 0, // Not in schema, placeholder
+        unhelpfulCount: 0, // Not in schema, placeholder
+        createdAt: appointment.review.createdAt || appointment.createdAt
+      }));
+
+      // Calculate statistics
+      const allReviewsForStats = await Appointment.find({
+        doctor: { $in: doctorIds },
+        'review.rating': { $exists: true, $ne: null }
+      }).select('review status');
+
+      const totalReviewCount = allReviewsForStats.length;
+      const averageRating = totalReviewCount > 0
+        ? allReviewsForStats.reduce((sum, apt) => sum + apt.review.rating, 0) / totalReviewCount
+        : 0;
+      const verifiedConsultations = allReviewsForStats.filter(
+        apt => apt.status === 'completed'
+      ).length;
+
+      // Pagination metadata
+      const totalPages = Math.ceil(totalReviews / limit);
+      const hasNextPage = page < totalPages;
+      const hasPrevPage = page > 1;
+
+      res.status(200).json({
+        success: true,
+        data: {
+          reviews,
+          pagination: {
+            currentPage: page,
+            totalPages,
+            totalReviews,
+            limit,
+            hasNextPage,
+            hasPrevPage
+          },
+          statistics: {
+            totalReviews: totalReviewCount,
+            averageRating: parseFloat(averageRating.toFixed(1)),
+            verifiedConsultations
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching hospital reviews:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch hospital reviews',
+        error: error.message
+      });
+    }
+  },
+
+
+  getHospitalEarnings: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+
+      // Pagination parameters
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+
+      // Search and filter parameters
+      const searchTerm = req.query.search || '';
+      const statusFilter = req.query.status || 'all';
+      const sortBy = req.query.sortBy || 'scheduledDate';
+      const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+
+      // Find all doctors affiliated with this hospital
+      const hospitalDoctors = await Doctor.find({
+        'hospitalAffiliations.hospital': hospitalId
+      }).select('_id fullName specializations');
+
+      const doctorIds = hospitalDoctors.map(doc => doc._id);
+
+      if (doctorIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            earnings: [],
+            pagination: {
+              currentPage: page,
+              totalPages: 0,
+              totalEarnings: 0,
+              limit,
+              hasNextPage: false,
+              hasPrevPage: false
+            },
+            statistics: {
+              totalRevenue: 0,
+              pendingRevenue: 0,
+              creditedRevenue: 0,
+              cancelledRevenue: 0
+            }
+          }
+        });
+      }
+
+      // Build query
+      let query = {
+        doctor: { $in: doctorIds }
+      };
+
+      // Add status filter
+      if (statusFilter !== 'all') {
+        query.status = statusFilter;
+      }
+
+      // Add search functionality
+      if (searchTerm) {
+        const searchRegex = new RegExp(searchTerm, 'i');
+
+        // Find matching doctors
+        const matchingDoctors = await Doctor.find({
+          _id: { $in: doctorIds },
+          $or: [
+            { fullName: searchRegex },
+            { specializations: searchRegex }
+          ]
+        }).select('_id');
+
+        // Search by amount or doctor
+        const amountSearch = parseFloat(searchTerm);
+        if (!isNaN(amountSearch)) {
+          query.$or = [
+            { doctor: { $in: matchingDoctors.map(d => d._id) } },
+            { amount: amountSearch }
+          ];
+        } else {
+          query.doctor = { $in: matchingDoctors.map(d => d._id) };
+        }
+      }
+
+      // Get total count for pagination
+      const totalEarnings = await UpcomingEarnings.countDocuments(query);
+
+      // Build sort object
+      let sortObj = {};
+      if (sortBy === 'amount') {
+        sortObj.amount = sortOrder;
+      } else if (sortBy === 'status') {
+        sortObj.status = sortOrder;
+      } else if (sortBy === 'scheduledDate') {
+        sortObj.scheduledDate = sortOrder;
+      } else {
+        sortObj.scheduledDate = -1; // Default sort
+      }
+
+      // Fetch upcoming earnings
+      let earnings = await UpcomingEarnings.find(query)
+        .populate({
+          path: 'doctor',
+          select: 'fullName specializations'
+        })
+        .populate({
+          path: 'appointment',
+          select: 'date appointmentType'
+        })
+        .populate({
+          path: 'payment',
+          select: 'amount totalamount gateway.transactionId'
+        })
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      // Manual sorting for doctor name if needed
+      if (sortBy === 'doctorInfo.fullName') {
+        earnings.sort((a, b) => {
+          const aVal = a.doctor?.fullName || '';
+          const bVal = b.doctor?.fullName || '';
+          return sortOrder === 1
+            ? aVal.localeCompare(bVal)
+            : bVal.localeCompare(aVal);
+        });
+      }
+
+      // Transform data to match frontend format
+      const formattedEarnings = earnings.map(earning => ({
+        _id: earning._id.toString(),
+        amount: earning.amount,
+        status: earning.status,
+        scheduledDate: earning.scheduledDate,
+        doctor: earning.doctor?._id?.toString() || '',
+        payment: earning.payment?._id?.toString() || '',
+        appointment: earning.appointment?._id?.toString() || '',
+        doctorInfo: {
+          _id: earning.doctor?._id?.toString() || '',
+          fullName: earning.doctor?.fullName || 'Unknown',
+          specializations: earning.doctor?.specializations || []
+        },
+        appointmentDate: earning.appointment?.date || null,
+        appointmentType: earning.appointment?.appointmentType || null,
+        paymentAmount: earning.payment?.amount || 0,
+        transactionId: earning.payment?.gateway?.transactionId || null,
+        notes: earning.notes || ''
+      }));
+
+      // Calculate statistics for all earnings (not just current page)
+      const allEarnings = await UpcomingEarnings.find({
+        doctor: { $in: doctorIds }
+      }).select('amount status');
+
+      const totalRevenue = allEarnings.reduce((sum, e) => sum + e.amount, 0);
+      const pendingRevenue = allEarnings
+        .filter(e => e.status === 'pending')
+        .reduce((sum, e) => sum + e.amount, 0);
+      const creditedRevenue = allEarnings
+        .filter(e => e.status === 'credited')
+        .reduce((sum, e) => sum + e.amount, 0);
+      const cancelledRevenue = allEarnings
+        .filter(e => e.status === 'cancelled')
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      // Pagination metadata
+      const totalPages = Math.ceil(totalEarnings / limit);
+      const hasNextPage = page < totalPages;
+      const hasPrevPage = page > 1;
+
+      res.status(200).json({
+        success: true,
+        data: {
+          earnings: formattedEarnings,
+          pagination: {
+            currentPage: page,
+            totalPages,
+            totalEarnings,
+            limit,
+            hasNextPage,
+            hasPrevPage
+          },
+          statistics: {
+            totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+            pendingRevenue: parseFloat(pendingRevenue.toFixed(2)),
+            creditedRevenue: parseFloat(creditedRevenue.toFixed(2)),
+            cancelledRevenue: parseFloat(cancelledRevenue.toFixed(2))
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching hospital earnings:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch hospital earnings',
+        error: error.message
+      });
+    }
+  },
+
+
+  getEarningDetails: async (req, res) => {
+    try {
+      const { earningId } = req.user;
+
+      const earning = await UpcomingEarnings.findById(earningId)
+        .populate({
+          path: 'doctor',
+          select: 'fullName specializations registrationNumber'
+        })
+        .populate({
+          path: 'appointment',
+          select: 'date appointmentType status reason',
+          populate: {
+            path: 'patient',
+            select: 'fullName email mobileNumber'
+          }
+        })
+        .populate({
+          path: 'payment',
+          select: 'amount totalamount gstamount status paymentMethod gateway'
+        })
+        .lean();
+
+      if (!earning) {
+        return res.status(404).json({
+          success: false,
+          message: 'Earning record not found'
+        });
+      }
+
+      // Format response
+      const formattedEarning = {
+        _id: earning._id.toString(),
+        amount: earning.amount,
+        status: earning.status,
+        scheduledDate: earning.scheduledDate,
+        notes: earning.notes,
+        createdAt: earning.createdAt,
+        updatedAt: earning.updatedAt,
+        doctor: {
+          _id: earning.doctor?._id?.toString() || '',
+          fullName: earning.doctor?.fullName || 'Unknown',
+          specializations: earning.doctor?.specializations || [],
+          registrationNumber: earning.doctor?.registrationNumber || ''
+        },
+        appointment: {
+          _id: earning.appointment?._id?.toString() || '',
+          date: earning.appointment?.date || null,
+          appointmentType: earning.appointment?.appointmentType || null,
+          status: earning.appointment?.status || null,
+          reason: earning.appointment?.reason || '',
+          patient: {
+            fullName: earning.appointment?.patient?.fullName || 'Unknown',
+            email: earning.appointment?.patient?.email || '',
+            mobileNumber: earning.appointment?.patient?.mobileNumber || ''
+          }
+        },
+        payment: {
+          _id: earning.payment?._id?.toString() || '',
+          amount: earning.payment?.amount || 0,
+          totalamount: earning.payment?.totalamount || 0,
+          gstamount: earning.payment?.gstamount || 0,
+          status: earning.payment?.status || '',
+          paymentMethod: earning.payment?.paymentMethod || '',
+          transactionId: earning.payment?.gateway?.transactionId || null,
+          referenceId: earning.payment?.gateway?.referenceId || null
+        }
+      };
+
+      res.status(200).json({
+        success: true,
+        data: formattedEarning
+      });
+
+    } catch (error) {
+      console.error('Error fetching earning details:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch earning details',
+        error: error.message
       });
     }
   }

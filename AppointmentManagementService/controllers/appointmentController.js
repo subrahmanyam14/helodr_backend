@@ -10,6 +10,7 @@ const User = require('../models/User');
 const Statistics = require("../models/Statistics");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 const Wallet = require("../models/Wallet");
+const HealthRecord = require("../models/HealthRecords");
 
 exports.getDoctorActivity = async (req, res) => {
   try {
@@ -1097,23 +1098,15 @@ exports.getDoctorPatientById = async (req, res) => {
       });
     }
 
-    // Find patient by ID and role, populate doctor and medical records
-    const [patient, appointments] = await Promise.all([
+    // Find patient by ID and role
+    const [patient, appointments, healthRecords] = await Promise.all([
       User.findOne({
         _id: patientId,
         role: "patient"
       })
-        .populate({
-          path: 'doctorId',
-          select: 'fullName email specialization' // Adjust fields based on your Doctor model
-        })
-        .populate({
-          path: 'medicalRecords.doctorId',
-          select: 'fullName specialization'
-        })
         .select('-password'), // Exclude password from response
 
-      // Fetch patient's appointments
+      // Fetch patient's appointments with populated fields
       Appointment.find({ patient: patientId })
         .populate({
           path: 'doctor',
@@ -1123,8 +1116,21 @@ exports.getDoctorPatientById = async (req, res) => {
           path: 'payment',
           select: 'amount status paymentMethod'
         })
+        .populate({
+          path: 'healthRecord',
+          select: 'record_type file_urls description createdAt'
+        })
         .sort({ date: -1, 'slot.startTime': -1 })
-        .limit(50) // Limit to recent 50 appointments
+        .limit(50), // Limit to recent 50 appointments
+
+      // Fetch patient's health records
+      HealthRecord.find({ user_id: patientId })
+        .populate({
+          path: 'appointment_id',
+          select: 'date appointmentType status'
+        })
+        .sort({ createdAt: -1 })
+        .limit(50) // Limit to recent 50 records
     ]);
 
     if (!patient) {
@@ -1156,8 +1162,7 @@ exports.getDoctorPatientById = async (req, res) => {
             pinCode: patient.pinCode,
             country: patient.country
           },
-          assignedDoctor: patient.doctorId,
-          medicalRecords: patient.medicalRecords,
+          healthRecords: healthRecords,
           appointments: appointments,
           createdAt: patient.createdAt,
           updatedAt: patient.updatedAt

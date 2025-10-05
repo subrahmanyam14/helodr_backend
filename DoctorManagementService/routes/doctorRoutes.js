@@ -167,5 +167,50 @@ router.get('/hospital/meta/doctor-counts',
   DoctorController.getHospitalDoctorCounts
 );
 
+router.get('/doctor/:id',
+  protect,
+  authorize('hospitaladmin', 'admin'),
+  DoctorController.getDoctorById
+);
+
+router.get('/hospitalId/dashboardstats',
+  protect,
+  authorize('hospitaladmin'),
+  DoctorController.getHospitalDashboardStats
+);
+
+router.get('/hospitalId/dashboard',
+  protect,
+  authorize('hospitaladmin'),
+  DoctorController.getHospitalDashboard
+);
+
+
+router.get('/hospitalId/patients', 
+  protect,
+  authorize('hospitaladmin', 'admin'),
+  DoctorController.getHospitalPatients
+)
+
+
+router.get('/hospitalId/appoinments', 
+  protect,
+  authorize('hospitaladmin'),
+  DoctorController.getHospitalAppointments
+)
+
+
+router.get('/hospitalId/reviews', 
+  protect,
+  authorize('hospitaladmin'),
+  DoctorController.getHospitalReviews
+)
+
+
+router.get('/hospitalId/earnigs', 
+  protect,
+  authorize('hospitaladmin'),
+  DoctorController.getHospitalEarnings
+)
 
 module.exports = router;

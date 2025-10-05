@@ -7,6 +7,10 @@ const healthRecordSchema = new Schema({
         required: true, 
         ref: 'User' 
     },
+    appointment_id: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'Appointment' 
+    },
     record_type: { 
         type: String, 
         enum: ["prescription", "report", "image", "other"]
