@@ -9,6 +9,7 @@ const validator = require('validator');
 const bcrypt = require('bcryptjs');
 const { default: isEmail } = require('validator/lib/isEmail');
 const Doctor = require('../models/Doctor');
+const Hospital = require('../models/Hospital');
 dotenv.config();
 
 const transportStorageServiceUrl = process.env.TRANSPORT_STORAGE_SERVICE_URL;
@@ -36,7 +37,7 @@ exports.login = async (req, res) => {
     // Find user by email or mobile
     const user = await User.findOne({
       $or: [{ mobileNumber: emailOrMobile }, { email: emailOrMobile }]
-    }).select('password role mobileNumber fullName countryCode email isMobileVerified isEmailVerified _id doctorId');
+    }).select('password role mobileNumber fullName countryCode email isMobileVerified isEmailVerified _id doctorId hospitalId');
     // console.log(user);
 
     if (!user) {
@@ -65,7 +66,7 @@ exports.login = async (req, res) => {
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
-      
+
 
       // Update login status
       await LoginStatus.findOneAndUpdate(user._id, {
@@ -73,42 +74,54 @@ exports.login = async (req, res) => {
         ip_address: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
         device: req.headers['user-agent'] || 'Unknown',
       },
-      { new: true, runValidators: true }
-    );
-    const additionData = {};
-    if(user.role === "doctor")
-    {
-      const doctor = await Doctor.findOne({user: user._id});
-      if(!doctor)
-      {
-        additionData.status = "doctor_details_are_not_added_yet";
-        additionData.message = "Please add your doctors details inorder to send the application details to admin for approval.";
+        { new: true, runValidators: true }
+      );
+      const additionData = {};
+      if (user.role === "doctor") {
+        const doctor = await Doctor.findOne({ user: user._id });
+        if (!doctor) {
+          additionData.status = "doctor_details_are_not_added_yet";
+          additionData.message = "Please add your doctors details inorder to send the application details to admin for approval.";
+        }
+        // else if( doctor.hospitalAffiliations === null)
+        // {
+        //   additionData.status = "add_clinic_or_hospital_details_are_not_added";
+        //   additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
+        // }
+        // else if(!doctor.verifiedByAdmin){
+        //   additionData.status = "Pending_for_admin_approval";
+        //   additionData.message = "Application was waiting for the approval by admin";
+        // }
+        // else if(!doctor.verifiedBySuperAdmin){
+        //   additionData.status = "Pending_for_superadmin_approval";
+        //   additionData.message = "Application was waiting for the approval by superadmin";
+        // }
+        else if (doctor.isActive === false) {
+          additionData.status = "profile_not_in_active_status";
+          additionData.message = "Please contact the admin for the profile to activate";
+        }
+        else {
+          additionData.status = "profile_in_active_status";
+          additionData.specializations = doctor.specializations;
+          additionData.message = "No remarks.";
+        }
+      } else if (user.role === "hospitaladmin") {
+        const hospital = await Hospital.findOne({ addedBy: user._id });
+        if (!hospital) {
+          additionData.status = "hospital_details_are_not_added_yet";
+          additionData.message = "Please add your Hospital details inorder to send the application details to admin for approval.";
+        }
+        else if (hospital.isActive === false) {
+          additionData.status = "hospital_profile_not_in_active_status";
+          additionData.message = "Please contact the admin for the profile to activate";
+        }
+        else {
+          additionData.status = "hospital_profile_in_active_status";
+          // additionData.specializations = doctor.specializations;
+          additionData.message = "No remarks.";
+        }
       }
-      // else if( doctor.hospitalAffiliations === null)
-      // {
-      //   additionData.status = "add_clinic_or_hospital_details_are_not_added";
-      //   additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
-      // }
-      // else if(!doctor.verifiedByAdmin){
-      //   additionData.status = "Pending_for_admin_approval";
-      //   additionData.message = "Application was waiting for the approval by admin";
-      // }
-      // else if(!doctor.verifiedBySuperAdmin){
-      //   additionData.status = "Pending_for_superadmin_approval";
-      //   additionData.message = "Application was waiting for the approval by superadmin";
-      // }
-      else if( doctor.isActive === false)
-      {
-        additionData.status = "profile_not_in_active_status";
-        additionData.message = "Please contact the admin for the profile to activate";
-      }
-      else{
-        additionData.status = "profile_in_active_status";
-        additionData.specializations = doctor.specializations;
-        additionData.message = "No remarks.";
-      }
-    }
- 
+
       await user.save();
 
       return res.status(200).json({
@@ -122,7 +135,8 @@ exports.login = async (req, res) => {
           role: user.role,
           id: user._id,
           additionData,
-          ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {})
+          ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {}),
+          ...(user.role === 'hospitaladmin' ? { hospitalId: user.hospitalId } : {})
         },
         token
       });
@@ -145,10 +159,10 @@ exports.login = async (req, res) => {
           setDefaultsOnInsert: true // apply defaults if creating
         }
       );
-      
+
 
       try {
-        
+
 
         // const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
         //   to: `${user.countryCode}${user.mobileNumber}`,
@@ -156,9 +170,9 @@ exports.login = async (req, res) => {
         // });
 
         const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
-        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+          fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
 
-      });
+        });
 
         if (!response.data.success) {
           return res.status(500).json({
@@ -174,7 +188,7 @@ exports.login = async (req, res) => {
           process.env.JWT_SECRET,
           { expiresIn: '15m' }
         );
-        
+
 
         return res.status(200).json({
           success: true,
@@ -216,13 +230,13 @@ exports.login = async (req, res) => {
           setDefaultsOnInsert: true // apply defaults if creating
         }
       );
-      
+
 
       try {
         const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
-        fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
+          fullName: user.fullName, email: user.email, otpCode: otp, generatedTime: new Date(), expiryTime: new Date(new Date().getTime() + 15 * 60 * 1000)
 
-      });
+        });
 
         if (!response.data.success) {
           return res.status(500).json({
@@ -238,7 +252,7 @@ exports.login = async (req, res) => {
           process.env.JWT_SECRET,
           { expiresIn: '15m' }
         );
-        
+
 
         return res.status(200).json({
           success: true,
@@ -295,7 +309,7 @@ exports.registerPatient = async (req, res) => {
     }
 
     // Check if mobile number already exists
-    const existingUser = await User.findOne({ $or: [{email: email}, {$and: [{ mobileNumber }, { countryCode }]}] });
+    const existingUser = await User.findOne({ $or: [{ email: email }, { $and: [{ mobileNumber }, { countryCode }] }] });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -331,7 +345,7 @@ exports.registerPatient = async (req, res) => {
         setDefaultsOnInsert: true // apply defaults if creating
       }
     );
-    
+
     // Send OTP via API request
     try {
       const response = await axios.post(`${transportStorageServiceUrl}/mail/sendOTP`, {
@@ -384,7 +398,7 @@ exports.registerPatient = async (req, res) => {
       });
     }
 
-    
+
 
     // Generate temporary token for verification step
     const tempToken = jwt.sign(
@@ -430,7 +444,7 @@ exports.registerAdmin = async (req, res) => {
     }
 
     // Check if mobile number already exists
-    const existingUser = await User.findOne({ $or: [{email: email}, {$and: [{ mobileNumber }, { countryCode }]}] });
+    const existingUser = await User.findOne({ $or: [{ email: email }, { $and: [{ mobileNumber }, { countryCode }] }] });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -465,7 +479,7 @@ exports.registerAdmin = async (req, res) => {
         setDefaultsOnInsert: true // apply defaults if creating
       }
     );
-    
+
     // Send OTP via API request
     try {
       // const response = await axios.post(`${transportStorageServiceUrl}/sms/sendOTP`, {
@@ -523,7 +537,7 @@ exports.registerAdmin = async (req, res) => {
       });
     }
 
-    
+
 
     // Generate temporary token for verification step
     const tempToken = jwt.sign(
@@ -650,34 +664,45 @@ exports.verifyMobileOTP = async (req, res) => {
       { expiresIn: '7d' }
     );
     const additionData = {};
-    if(user.role === "doctor" && decoded.purpose !== 'mobile_verification')
-    {
-      const doctor = await Doctor.findOne({user: user._id});
-      if(!doctor)
-      {
+    if (user.role === "doctor" && decoded.purpose !== 'mobile_verification') {
+      const doctor = await Doctor.findOne({ user: user._id });
+      if (!doctor) {
         additionData.status = "doctor_details_are_not_added_yet";
         additionData.message = "Please add your doctors details inorder to send the application details to admin for approval.";
       }
-      else if( doctor.hospitalAffiliations === null)
-      {
-        additionData.status = "add_clinic_or_hospital_details_are_not_added";
-        additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
-      }
-      else if(!doctor.verifiedByAdmin){
-        additionData.status = "Pending_for_admin_approval";
-        additionData.message = "Application was waiting for the approval by admin";
-      }
-      else if(!doctor.verifiedBySuperAdmin){
-        additionData.status = "Pending_for_superadmin_approval";
-        additionData.message = "Application was waiting for the approval by superadmin";
-      }
-      else if( doctor.isActive === false)
-      {
+      // else if (doctor.hospitalAffiliations === null) {
+      //   additionData.status = "add_clinic_or_hospital_details_are_not_added";
+      //   additionData.message = "Please add your clinic or hospital details inorder to send the application details to admin for approval.";
+      // }
+      // else if (!doctor.verifiedByAdmin) {
+      //   additionData.status = "Pending_for_admin_approval";
+      //   additionData.message = "Application was waiting for the approval by admin";
+      // }
+      // else if (!doctor.verifiedBySuperAdmin) {
+      //   additionData.status = "Pending_for_superadmin_approval";
+      //   additionData.message = "Application was waiting for the approval by superadmin";
+      // }
+      else if (doctor.isActive === false) {
         additionData.status = "profile_not_in_active_status";
         additionData.message = "Please contact the admin for the profile to activate";
       }
-      else{
+      else {
         additionData.status = "profile_in_active_status";
+        additionData.message = "No remarks.";
+      }
+    } else if (user.role === "hospitaladmin") {
+      const hospital = await Hospital.findOne({ addedBy: user._id });
+      if (!hospital) {
+        additionData.status = "hospital_details_are_not_added_yet";
+        additionData.message = "Please add your Hospital details inorder to send the application details to admin for approval.";
+      }
+      else if (hospital.isActive === false) {
+        additionData.status = "hospital_profile_not_in_active_status";
+        additionData.message = "Please contact the admin for the profile to activate";
+      }
+      else {
+        additionData.status = "hospital_profile_in_active_status";
+        additionData.specializations = doctor.specializations;
         additionData.message = "No remarks.";
       }
     }
@@ -699,7 +724,9 @@ exports.verifyMobileOTP = async (req, res) => {
         isMobileVerified: user.isMobileVerified,
         countryCode: user.countryCode,
         profilePhoto: user.profilePhoto,
-        additionData
+        additionData,
+        ...(user.role === 'doctor' ? { doctorId: user.doctorId } : {}),
+        ...(user.role === 'hospitaladmin' ? { doctorId: user.hospitalId } : {})
       },
       token: authToken
     };
@@ -716,16 +743,15 @@ exports.verifyMobileOTP = async (req, res) => {
   }
 };
 
-exports.verifyEmail = async( req, res ) => {
+exports.verifyEmail = async (req, res) => {
   try {
-    const {email, verificationToken} = req.query;
-    if(!email || !verificationToken)
-    {
+    const { email, verificationToken } = req.query;
+    if (!email || !verificationToken) {
       return res.status(400).send({
         success: false,
         message: 'email or token missing'
       });
-    }  
+    }
     // Verify the JWT token
     let decoded;
     try {
@@ -761,8 +787,8 @@ exports.verifyEmail = async( req, res ) => {
     user.isEmailVerified = true;
     await user.save();
 
-     // Generate proper auth token 
-     const authToken = jwt.sign(
+    // Generate proper auth token 
+    const authToken = jwt.sign(
       {
         id: user._id,
         role: user.role,
@@ -819,7 +845,7 @@ exports.resendOTP = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({  mobileNumber });
+    const user = await User.findOne({ mobileNumber });
 
     if (!user) {
       return res.status(404).json({
@@ -833,10 +859,10 @@ exports.resendOTP = async (req, res) => {
     const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes expiry
 
     // Update OTP
-    await Otp.findOneAndUpdate({ user_id: user._id }, { 
+    await Otp.findOneAndUpdate({ user_id: user._id }, {
       otp_code: otp,
       expires_at: otpExpiry
-     });
+    });
 
 
     // Generate new temporary token
@@ -933,7 +959,7 @@ exports.updateProfile = async (req, res) => {
       pinCode
     } = req.body;
 
-    let profilePhoto = req.body.profilePhoto; 
+    let profilePhoto = req.body.profilePhoto;
 
     // Find user
     const user = await User.findById(req.user.id);
@@ -947,7 +973,7 @@ exports.updateProfile = async (req, res) => {
     }
 
     // ✅ **Check if files exist before processing**
-    if (req.file && req.file.profilePicture ) {
+    if (req.file && req.file.profilePicture) {
       try {
         const formData = new FormData();
 
@@ -1124,7 +1150,7 @@ exports.sendEmailVerification = async (req, res) => {
         message: 'User not found'
       });
     }
-      console.log(user)
+    console.log(user)
     // Generate email verification token
     const token = jwt.sign(
       { id: user._id, email, purpose: 'email_verification' },
@@ -1146,7 +1172,7 @@ exports.sendEmailVerification = async (req, res) => {
         throw new Error(response.data.message || 'Failed to send email verification');
       }
 
-      
+
     } catch (apiError) {
       console.error('Error sending email verification:', apiError.response?.data || apiError.message);
       return res.status(500).json({
@@ -1220,7 +1246,7 @@ exports.updatePassword = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Incorrect current password'
-      }); 
+      });
     }
 
     // Update password
@@ -1262,7 +1288,7 @@ exports.forgotPassword = async (req, res) => {
         message: 'User not found'
       });
     }
-    if(!user.isMobileVerified){
+    if (!user.isMobileVerified) {
       return res.status(400).json({
         success: false,
         message: 'Mobile number is not verified'
@@ -1274,23 +1300,23 @@ exports.forgotPassword = async (req, res) => {
     const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes expiry
 
     // Update OTP
-    await Otp.findOneAndUpdate({ user_id: user._id }, { 
+    await Otp.findOneAndUpdate({ user_id: user._id }, {
       otp_code: otp,
       expires_at: otpExpiry
-     }, {
+    }, {
       upsert: true,
       new: true,
       setDefaultsOnInsert: true
-     });
+    });
 
-     const forgotPasswordVerifyToken = jwt.sign(
+    const forgotPasswordVerifyToken = jwt.sign(
       { id: user._id, mobile: user.mobileNumber, purpose: 'forgot_password_verification' },
       process.env.JWT_SECRET,
       { expiresIn: '1d' }
     );
     // console.log(forgotPasswordVerifyToken) 
-     // Send OTP via API request with error handling
-     try {
+    // Send OTP via API request with error handling
+    try {
       // const response = await axios.post(`${process.env.TRANSPORT_STORAGE_SERVICE_URL}/sms/sendOTP`, {
       //   to: `${user.countryCode}${mobileNumber}`,
       //   otp
@@ -1336,7 +1362,7 @@ exports.forgotPassword = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
-console.log(token,newPassword)
+    console.log(token, newPassword)
     if (!token || !newPassword) {
       return res.status(400).json({
         success: false,
@@ -1352,7 +1378,7 @@ console.log(token,newPassword)
         message: 'Invalid token purpose'
       });
     }
-    
+
     const user = await User.findById(decoded.id);
 
     if (!user) {
@@ -1382,4 +1408,4 @@ console.log(token,newPassword)
 
 
 
-    
+

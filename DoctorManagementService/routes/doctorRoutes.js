@@ -155,6 +155,17 @@ router.get('/:doctorId/affiliations',
   DoctorController.getDoctorAffiliations
 );
 
+router.get('/hospital/doctors/profile',
+  protect,
+  authorize('hospitaladmin', 'admin'),
+  DoctorController.getHospitalDoctors
+);
+
+router.get('/hospital/meta/doctor-counts',
+  protect,
+  authorize('hospitaladmin', 'admin'),
+  DoctorController.getHospitalDoctorCounts
+);
 
 
 module.exports = router;

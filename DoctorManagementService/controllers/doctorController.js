@@ -207,103 +207,103 @@ const sanitizeRegex = (str) => {
 
 const DoctorController = {
   // Register a new doctor
-registerDoctor: async (req, res) => {
-  try {
-    const {
-      title,
-      specializations,
-      registrationNumber,
-      qualifications,
-      experience,
-      languages,
-      bio,
-      clinicConsultationFee,
-      followUpFee,
-      services,
-      onlineConsultation
-    } = req.body;
+  registerDoctor: async (req, res) => {
+    try {
+      const {
+        title,
+        specializations,
+        registrationNumber,
+        qualifications,
+        experience,
+        languages,
+        bio,
+        clinicConsultationFee,
+        followUpFee,
+        services,
+        onlineConsultation
+      } = req.body;
 
-    // Check if doctor already exists for this user
-    const existingDoctor = await Doctor.findOne({ user: req.user.id });
-    if (existingDoctor) {
-      return res.status(400).json({
+      // Check if doctor already exists for this user
+      const existingDoctor = await Doctor.findOne({ user: req.user.id });
+      if (existingDoctor) {
+        return res.status(400).json({
+          success: false,
+          message: 'Doctor profile already exists for this user',
+          data: existingDoctor
+        });
+      }
+
+      const existingUser = await User.findById(req.user.id);
+      if (!existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: 'User profile does not exist for this Doctor.'
+        });
+      }
+
+      // Create new doctor
+      const newDoctor = new Doctor({
+        user: req.user.id,
+        title: title || 'Dr.',
+        specializations: specializations || [],
+        registrationNumber,
+        qualifications: qualifications || [],
+        experience: experience || 0,
+        languages: languages || [],
+        bio: bio || '',
+        clinicConsultationFee: clinicConsultationFee || 0,
+        followUpFee: followUpFee || 0,
+        services: services || [],
+        onlineConsultation: onlineConsultation || {
+          isAvailable: false,
+          consultationFee: 0
+        },
+        isActive: true
+      });
+
+      await newDoctor.save();
+
+      // Create default settings for the doctor
+      const newSettings = new Settings({
+        user: req.user.id,
+        email_notifications: true,
+        sms_notifications: true,
+        push_notifications: true,
+        auto_withdraw: false,
+        auto_withdraw_threshold: 5000,
+        payment_method: 'bank_transfer'
+      });
+
+      await newSettings.save();
+
+      // Update user with doctor reference
+      existingUser.doctorId = newDoctor._id;
+      await existingUser.save();
+
+      res.status(201).json({
+        success: true,
+        message: 'Doctor registered successfully',
+        doctor: newDoctor,
+        settings: newSettings
+      });
+
+    } catch (error) {
+      console.error("Error in registerDoctor: ", error);
+
+      if (error.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: 'Doctor profile already exists for this user'
+        });
+      }
+
+      res.status(500).json({
         success: false,
-        message: 'Doctor profile already exists for this user',
-        data: existingDoctor
+        message: 'Error registering doctor',
+        error: error.message
       });
     }
-
-    const existingUser = await User.findById(req.user.id);
-    if (!existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'User profile does not exist for this Doctor.'
-      });
-    }
-
-    // Create new doctor
-    const newDoctor = new Doctor({
-      user: req.user.id,
-      title: title || 'Dr.',
-      specializations: specializations || [],
-      registrationNumber,
-      qualifications: qualifications || [],
-      experience: experience || 0,
-      languages: languages || [],
-      bio: bio || '',
-      clinicConsultationFee: clinicConsultationFee || 0,
-      followUpFee: followUpFee || 0,
-      services: services || [],
-      onlineConsultation: onlineConsultation || {
-        isAvailable: false,
-        consultationFee: 0
-      },
-      isActive: true
-    });
-
-    await newDoctor.save();
-
-    // Create default settings for the doctor
-    const newSettings = new Settings({
-      user: req.user.id,
-      email_notifications: true,
-      sms_notifications: true,
-      push_notifications: true,
-      auto_withdraw: false,
-      auto_withdraw_threshold: 5000,
-      payment_method: 'bank_transfer'
-    });
-
-    await newSettings.save();
-
-    // Update user with doctor reference
-    existingUser.doctorId = newDoctor._id;
-    await existingUser.save();
-
-    res.status(201).json({
-      success: true,
-      message: 'Doctor registered successfully',
-      doctor: newDoctor,
-      settings: newSettings
-    });
-
-  } catch (error) {
-    console.error("Error in registerDoctor: ", error);
-    
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Doctor profile already exists for this user'
-      });
-    }
-    
-    res.status(500).json({
-      success: false,
-      message: 'Error registering doctor',
-      error: error.message
-    });
-  }
-},
+  },
 
   // Ad d or update hospital affiliations
   addHospitalAffiliation: async (req, res) => {
@@ -394,6 +394,25 @@ registerDoctor: async (req, res) => {
         });
       }
 
+      // Check if hospitalAdmin already exists for this user
+      const existingHospitalAdmin = await Hospital.findOne({ addedBy: req.user.id });
+      if (existingHospitalAdmin) {
+        return res.status(400).json({
+          success: false,
+          message: 'Hospital profile already exists for this user',
+          data: existingDoctor
+        });
+      }
+
+      const existingUser = await User.findById(req.user.id);
+      if (!existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: 'User profile does not exist for this Doctor.'
+        });
+      }
+
+
       // Create new hospital
       const newHospital = new Hospital({
         name,
@@ -429,16 +448,8 @@ registerDoctor: async (req, res) => {
       });
 
       await newHospital.save();
-      await Doctor.findOneAndUpdate({ user: req.user.id }, {
-        address: {
-          street: address.street,
-          city: address.city,
-          state: address.state,
-          country: address.country || 'India',
-          pinCode: address.pinCode,
-          coordinates: address.coordinates || undefined
-        },
-      })
+
+      await existingUser.updateOne({ hospitalId: newHospital._id });
 
       res.status(201).json({
         success: true,
@@ -1882,9 +1893,313 @@ registerDoctor: async (req, res) => {
         error: error.message
       });
     }
+  },
+
+  getHospitalDoctors: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+      const {
+        search,
+        specialization,
+        minExperience,
+        maxExperience,
+        page = 1,
+        limit = 10,
+        sortBy = 'experience',
+        sortOrder = 'desc'
+      } = req.query;
+
+      // Validate hospitalId
+      if (!hospitalId || !mongoose.Types.ObjectId.isValid(hospitalId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Valid hospital ID is required'
+        });
+      }
+
+      // Check if hospital exists
+      const hospital = await mongoose.model('Hospital').findById(hospitalId);
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Build filter query
+      const filterQuery = {
+        $and: [
+          {
+            $or: [
+              { 'hospitalAffiliations.hospital': hospitalId },
+              { _id: { $in: hospital.doctors || [] } }
+            ]
+          },
+          { isActive: true }
+        ]
+      };
+
+      // Add search filter (search in doctor name and specializations)
+      if (search) {
+        const searchRegex = new RegExp(search, 'i');
+        filterQuery.$and.push({
+          $or: [
+            { fullName: searchRegex },
+            { 'user.fullName': searchRegex },
+            { specializations: { $in: [searchRegex] } }
+          ]
+        });
+      }
+
+      // Add specialization filter
+      if (specialization) {
+        if (Array.isArray(specialization)) {
+          // Multiple specializations provided as array
+          filterQuery.$and.push({
+            specializations: { $in: specialization }
+          });
+        } else {
+          // Single specialization provided as string
+          const specializationRegex = new RegExp(specialization, 'i');
+          filterQuery.$and.push({
+            specializations: { $in: [specializationRegex] }
+          });
+        }
+      }
+
+      // Add experience range filter
+      if (minExperience || maxExperience) {
+        const experienceFilter = {};
+        if (minExperience) experienceFilter.$gte = parseInt(minExperience);
+        if (maxExperience) experienceFilter.$lte = parseInt(maxExperience);
+        filterQuery.$and.push({ experience: experienceFilter });
+      }
+
+      // Build sort object
+      const sortOptions = {};
+      switch (sortBy) {
+        case 'name':
+          sortOptions.fullName = sortOrder === 'desc' ? -1 : 1;
+          break;
+        case 'experience':
+          sortOptions.experience = sortOrder === 'desc' ? -1 : 1;
+          break;
+        case 'registrationNumber':
+          sortOptions.registrationNumber = sortOrder === 'desc' ? -1 : 1;
+          break;
+        default:
+          sortOptions.experience = -1;
+      }
+
+      // Calculate pagination
+      const pageNum = Math.max(1, parseInt(page));
+      const limitNum = Math.min(50, Math.max(1, parseInt(limit))); // Cap at 50 per page
+      const skip = (pageNum - 1) * limitNum;
+
+      // Get doctors with filters, pagination, and sorting
+      const doctors = await mongoose.model('Doctor')
+        .find(filterQuery)
+        .populate({
+          path: 'user',
+          select: 'fullName email countryCode mobileNumber',
+          match: { role: 'doctor' } // Ensure we're only getting doctor users
+        })
+        .select('fullName specializations registrationNumber experience user')
+        .skip(skip)
+        .limit(limitNum)
+        .sort(sortOptions)
+        .lean();
+
+      // Get total count for pagination
+      const totalCount = await mongoose.model('Doctor').countDocuments(filterQuery);
+
+      // Transform the data to match required fields
+      const doctorProfiles = doctors
+        .map(doctor => {
+          const user = doctor.user || {};
+
+          // Skip doctors without essential user data
+          if (!user.email && !user.mobileNumber) {
+            return null;
+          }
+
+          return {
+            id: doctor._id,
+            doctorName: doctor.fullName || user.fullName || 'Unknown',
+            specializations: doctor.specializations || [],
+            email: user.email || '',
+            mobile: user.countryCode && user.mobileNumber
+              ? `${user.countryCode}${user.mobileNumber}`
+              : user.mobileNumber || '',
+            registrationNumber: doctor.registrationNumber || 'Not Available',
+            experience: doctor.experience || 0
+          };
+        })
+        .filter(doctor => doctor !== null); // Remove null entries
+
+      // Prepare response with available filters for frontend reference
+      const response = {
+        success: true,
+        data: {
+          hospital: {
+            id: hospital._id,
+            name: hospital.name,
+            type: hospital.type
+          },
+          doctors: doctorProfiles,
+          pagination: {
+            currentPage: pageNum,
+            totalPages: Math.ceil(totalCount / limitNum),
+            totalDoctors: totalCount,
+            doctorsPerPage: limitNum,
+            hasNext: pageNum < Math.ceil(totalCount / limitNum),
+            hasPrev: pageNum > 1
+          },
+          filters: {
+            search: search || '',
+            specialization: specialization || '',
+            minExperience: minExperience || '',
+            maxExperience: maxExperience || '',
+            sortBy,
+            sortOrder
+          }
+        }
+      };
+
+      // Add available specializations if no search/filter is applied
+      if (!search && !specialization) {
+        const availableSpecializations = await mongoose.model('Doctor')
+          .distinct('specializations', {
+            $and: [
+              {
+                $or: [
+                  { 'hospitalAffiliations.hospital': hospitalId },
+                  { _id: { $in: hospital.doctors || [] } }
+                ]
+              },
+              { isActive: true }
+            ]
+          });
+        response.data.availableSpecializations = availableSpecializations.sort();
+      }
+
+      return res.status(200).json(response);
+
+    } catch (error) {
+      console.error('Error fetching hospital doctors:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error while fetching doctors',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+
+
+  },
+
+
+getHospitalDoctorCounts: async (req, res) => {
+    try {
+      const { hospitalId } = req.user;
+
+      // Validate hospitalId
+      if (!hospitalId || !mongoose.Types.ObjectId.isValid(hospitalId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Valid hospital ID is required'
+        });
+      }
+
+      // Check if hospital exists
+      const hospital = await mongoose.model('Hospital').findById(hospitalId);
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Parallel execution for all counts
+      const [
+        affiliatedDoctorsCount,
+        pendingRequestsCount,
+        specializationStats
+      ] = await Promise.all([
+        // Count affiliated doctors
+        mongoose.model('Doctor').countDocuments({
+          $and: [
+            {
+              $or: [
+                { 'hospitalAffiliations.hospital': hospitalId },
+                { _id: { $in: hospital.doctors || [] } }
+              ]
+            },
+            { isActive: true }
+          ]
+        }),
+
+        // Count ONLY PENDING affiliation requests
+        mongoose.model('HospitalAffiliationRequest').countDocuments({
+          hospital: hospitalId,
+          status: 'pending' // Only count pending requests
+        }),
+
+        // Get count for each specialization
+        mongoose.model('Doctor').aggregate([
+          {
+            $match: {
+              $and: [
+                {
+                  $or: [
+                    { 'hospitalAffiliations.hospital': new mongoose.Types.ObjectId(hospitalId) },
+                    { _id: { $in: hospital.doctors?.map(id => new mongoose.Types.ObjectId(id)) || [] } }
+                  ]
+                },
+                { isActive: true }
+              ]
+            }
+          },
+          { $unwind: '$specializations' },
+          {
+            $group: {
+              _id: '$specializations',
+              count: { $sum: 1 }
+            }
+          },
+          { $sort: { count: -1 } }
+        ])
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          hospital: {
+            id: hospital._id,
+            name: hospital.name
+          },
+          counts: {
+            affiliatedDoctors: affiliatedDoctorsCount,
+            pendingRequests: pendingRequestsCount, // Changed from affiliationRequestsCount to pendingRequests
+            specializations: specializationStats.length, // Total unique specializations
+            specializationBreakdown: specializationStats.map(stat => ({
+              specialization: stat._id,
+              count: stat.count
+            }))
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching hospital doctor counts:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error while fetching counts',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
   }
 
-};
+}
 
 
 
