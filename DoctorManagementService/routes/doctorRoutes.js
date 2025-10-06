@@ -34,6 +34,44 @@ router.post(
   DoctorController.registerDoctor
 );
 
+
+router.get(
+  '/profile/bio',
+  protect,
+  authorize('doctor'),
+  DoctorController.getMyDoctorProfile 
+);
+
+
+router.put(
+  '/profile/bio',
+  protect,
+  authorize('doctor'),
+  DoctorController.updateDoctorBio 
+);
+
+
+router.put(
+  '/profile/consultation-fees',
+  protect,
+  authorize('doctor'),
+  DoctorController.updateConsultationFees 
+);
+
+router.put(
+  '/profile/hospital-affiliation/:affiliationId/end',
+  protect,
+  authorize('doctor'),
+  DoctorController.endHospitalAffiliation 
+);
+
+router.put(
+  '/profile/meeting-link',
+  protect,
+  authorize('doctor'),
+  DoctorController.updateMeetingLink 
+);
+
 // Hospital routes
 router.post(
   '/hospital',

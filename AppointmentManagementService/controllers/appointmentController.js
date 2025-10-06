@@ -11,6 +11,16 @@ const Statistics = require("../models/Statistics");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 const Wallet = require("../models/Wallet");
 const HealthRecord = require("../models/HealthRecords");
+const Otp = require("../models/Otp");
+const axios = require('axios');
+const jwt = require('jsonwebtoken');
+require('dotenv').config();
+const transportStorageServiceUrl = process.env.TRANSPORT_STORAGE_SERVICE_URL || 'http://localhost:5001';
+
+// Helper function to generate OTP
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 exports.getDoctorActivity = async (req, res) => {
   try {
@@ -592,7 +602,7 @@ exports.getAppointments = async (req, res) => {
         return res.status(404).json({ success: false, message: 'Doctor profile not found' });
       }
     }
-   
+
     if (status) {
       query.status = status;
     }
@@ -617,7 +627,7 @@ exports.getAppointments = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-      //  console.log("data----------------------------------------");
+    //  console.log("data----------------------------------------");
     const total = await Appointment.countDocuments(query);
 
     res.status(200).json({
@@ -716,6 +726,479 @@ exports.updateAppointmentStatus = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 };
+
+exports.requestAppointmentCompletion = async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+
+    // Verify doctor is authorized
+    if (req.user.role !== 'doctor') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only doctors can request appointment completion'
+      });
+    }
+
+    // Find appointment and verify doctor ownership
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      doctor: req.user.doctorId
+    }).populate('patient', 'fullName email mobileNumber countryCode isEmailVerified isMobileVerified');
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found or you are not authorized'
+      });
+    }
+
+    // Check if appointment is in a valid state for completion
+    if (appointment.status === 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Appointment is already completed'
+      });
+    }
+
+    if (appointment.status === 'cancelled') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot complete a cancelled appointment'
+      });
+    }
+
+    if (appointment.status !== 'confirmed' && appointment.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Appointment must be confirmed or pending to request completion. Current status: ${appointment.status}`
+      });
+    }
+
+    // Check if appointment slot time has been completed
+    const appointmentDate = new Date(appointment.date);
+    const [endHours, endMinutes] = appointment.slot.endTime.split(':').map(Number);
+
+    // Create a date object with the appointment date and end time
+    const appointmentEndTime = new Date(appointmentDate);
+    appointmentEndTime.setHours(endHours, endMinutes, 0, 0);
+
+    const currentTime = new Date();
+
+    // Check if the appointment end time has passed
+    if (currentTime < appointmentEndTime) {
+      const timeDifference = appointmentEndTime - currentTime;
+      const minutesRemaining = Math.ceil(timeDifference / (1000 * 60));
+
+      return res.status(400).json({
+        success: false,
+        message: 'Appointment slot time has not been completed yet',
+        data: {
+          appointmentEndTime: appointmentEndTime.toISOString(),
+          currentTime: currentTime.toISOString(),
+          minutesRemaining: minutesRemaining,
+          note: `Please wait until the appointment slot ends at ${appointment.slot.endTime}`
+        }
+      });
+    }
+
+    const patient = appointment.patient;
+
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: 'Patient not found'
+      });
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes expiry
+
+    // Save OTP to database
+    await Otp.findOneAndUpdate(
+      { user_id: patient._id },
+      {
+        otp_code: otp,
+        expires_at: otpExpiry
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    // Send OTP via preferred method (email if verified, otherwise SMS)
+    try {
+      if (patient.isEmailVerified && patient.email) {
+        // Send OTP via email
+        const emailResponse = await axios.post(
+          `${transportStorageServiceUrl}/mail/sendOTP`,
+          {
+            fullName: patient.fullName,
+            email: patient.email,
+            otpCode: otp,
+            generatedTime: new Date(),
+            expiryTime: otpExpiry,
+            purpose: 'Appointment Completion Verification'
+          }
+        );
+
+        if (!emailResponse.data.success) {
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to send OTP via email',
+            error: emailResponse.data.message || 'Email service error'
+          });
+        }
+      } else if (patient.isMobileVerified && patient.mobileNumber) {
+        // Send OTP via SMS
+        // const smsResponse = await axios.post(
+        //   `${transportStorageServiceUrl}/sms/send-otp`,
+        //   {
+        //     mobileNumber: patient.mobileNumber,
+        //     countryCode: patient.countryCode,
+        //     otp: otp,
+        //     purpose: 'Appointment Completion'
+        //   }
+        // );
+
+        // if (!smsResponse.data.success) {
+        //   return res.status(500).json({
+        //     success: false,
+        //     message: 'Failed to send OTP via SMS',
+        //     error: smsResponse.data.message || 'SMS service error'
+        //   });
+        // }
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Patient has no verified contact method (email or mobile)'
+        });
+      }
+
+      // Generate verification token
+      const verificationToken = jwt.sign(
+        {
+          id: patient._id,
+          appointmentId: appointment._id,
+          doctorId: req.user.doctorId,
+          purpose: 'appointment_completion'
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '15m' }
+      );
+
+      // Create notification for patient
+      await Notification.create({
+        user: patient._id,
+        type: 'appointment_completion_request',
+        message: `Your doctor has requested to mark your appointment as completed. Please verify with the OTP sent to your ${patient.isEmailVerified ? 'email' : 'mobile number'}.`,
+        referenceId: appointment._id
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `OTP sent to patient's ${patient.isEmailVerified ? 'email' : 'mobile number'}`,
+        data: {
+          verificationToken,
+          appointmentId: appointment._id,
+          patientName: patient.fullName,
+          sentTo: patient.isEmailVerified ? patient.email : `${patient.countryCode}${patient.mobileNumber}`,
+          expiresAt: otpExpiry
+        }
+      });
+
+    } catch (apiError) {
+      console.error('OTP sending error:', apiError);
+
+      // Clean up OTP if sending failed
+      await Otp.findOneAndDelete({ user_id: patient._id });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send OTP',
+        error: apiError.response?.data?.message || apiError.message || 'OTP service unavailable'
+      });
+    }
+
+  } catch (error) {
+    console.error('Request appointment completion error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while requesting appointment completion',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+exports.verifyAppointmentCompletion = async (req, res) => {
+  try {
+    const { otp, verificationToken } = req.body;
+    const appointmentId = req.params.id;
+
+    // Validate input
+    if (!otp || !verificationToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP and verification token are required'
+      });
+    }
+
+    // Verify the JWT token
+    let decoded;
+    try {
+      decoded = jwt.verify(verificationToken, process.env.JWT_SECRET);
+
+      // Check if token has valid purpose
+      if (decoded.purpose !== 'appointment_completion') {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid token purpose'
+        });
+      }
+
+      // Verify appointment ID matches
+      if (decoded.appointmentId !== appointmentId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Token does not match appointment'
+        });
+      }
+
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired verification token',
+        error: jwtError.message
+      });
+    }
+
+    // Find patient
+    const patient = await User.findById(decoded.id);
+
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: 'Patient not found'
+      });
+    }
+
+    // Find OTP record
+    const otpRecord = await Otp.findOne({ user_id: patient._id });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP not found. Please request a new OTP.'
+      });
+    }
+
+    // Check if OTP matches and is not expired
+    if (otpRecord.otp_code !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP'
+      });
+    }
+
+    if (otpRecord.expires_at < new Date()) {
+      // Clean up expired OTP
+      await Otp.findOneAndDelete({ user_id: patient._id });
+      return res.status(400).json({
+        success: false,
+        message: 'OTP has expired. Please request a new OTP.'
+      });
+    }
+
+    // Find and update appointment
+    const appointment = await Appointment.findOneAndUpdate(
+      {
+        _id: appointmentId,
+        patient: patient._id,
+        doctor: decoded.doctorId
+      },
+      {
+        status: 'completed'
+      },
+      {
+        new: true
+      }
+    ).populate('doctor', 'fullName specializations')
+      .populate('patient', 'fullName email mobileNumber');
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found or already completed'
+      });
+    }
+
+    // Clear OTP after successful verification
+    await Otp.findOneAndDelete({ user_id: patient._id });
+
+    // Create notifications
+    await Notification.create({
+      user: patient._id,
+      type: 'appointment_completed',
+      message: 'Your appointment has been marked as completed',
+      referenceId: appointment._id
+    });
+
+    // Notify doctor
+    const doctorUser = await User.findOne({ doctorId: decoded.doctorId });
+    if (doctorUser) {
+      await Notification.create({
+        user: doctorUser._id,
+        type: 'appointment_completed',
+        message: `Appointment with ${patient.fullName} has been completed`,
+        referenceId: appointment._id
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Appointment marked as completed successfully',
+      data: {
+        appointment: {
+          id: appointment._id,
+          status: appointment.status,
+          date: appointment.date,
+          appointmentType: appointment.appointmentType,
+          doctor: appointment.doctor,
+          patient: {
+            id: appointment.patient._id,
+            fullName: appointment.patient.fullName
+          }
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Verify appointment completion error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while verifying appointment completion',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+exports.resendAppointmentCompletionOTP = async (req, res) => {
+  try {
+    const appointmentId = req.params.id;
+
+    // Verify doctor is authorized
+    if (req.user.role !== 'doctor') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only doctors can resend appointment completion OTP'
+      });
+    }
+
+    // Find appointment
+    const appointment = await Appointment.findOne({
+      _id: appointmentId,
+      doctor: req.user.doctorId
+    }).populate('patient', 'fullName email mobileNumber countryCode isEmailVerified isMobileVerified');
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Appointment not found'
+      });
+    }
+
+    const patient = appointment.patient;
+
+    // Check for existing OTP
+    const existingOtp = await Otp.findOne({ user_id: patient._id });
+
+    if (existingOtp && existingOtp.expires_at > new Date()) {
+      const timeSinceCreation = new Date() - existingOtp.createdAt;
+      const minTimeBetweenOtps = 60 * 1000; // 1 minute
+
+      if (timeSinceCreation < minTimeBetweenOtps) {
+        return res.status(429).json({
+          success: false,
+          message: 'Please wait before requesting another OTP',
+          retryAfter: Math.ceil((minTimeBetweenOtps - timeSinceCreation) / 1000)
+        });
+      }
+    }
+
+    // Generate new OTP
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
+
+    await Otp.findOneAndUpdate(
+      { user_id: patient._id },
+      {
+        otp_code: otp,
+        expires_at: otpExpiry
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    // Send OTP
+    try {
+      if (patient.isEmailVerified && patient.email) {
+        await axios.post(
+          `${transportStorageServiceUrl}/mail/sendOTP`,
+          {
+            fullName: patient.fullName,
+            email: patient.email,
+            otpCode: otp,
+            generatedTime: new Date(),
+            expiryTime: otpExpiry,
+            purpose: 'Appointment Completion Verification (Resent)'
+          }
+        );
+      } else if (patient.isMobileVerified && patient.mobileNumber) {
+        await axios.post(
+          `${transportStorageServiceUrl}/sms/send-otp`,
+          {
+            mobileNumber: patient.mobileNumber,
+            countryCode: patient.countryCode,
+            otp: otp,
+            purpose: 'Appointment Completion (Resent)'
+          }
+        );
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'OTP resent successfully',
+        data: {
+          expiresAt: otpExpiry
+        }
+      });
+
+    } catch (apiError) {
+      await Otp.findOneAndDelete({ user_id: patient._id });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to resend OTP',
+        error: apiError.message
+      });
+    }
+
+  } catch (error) {
+    console.error('Resend OTP error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while resending OTP',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
 
 exports.addPrescription = async (req, res) => {
   try {
@@ -1623,6 +2106,7 @@ exports.rescheduleAppointment = async (req, res) => {
     const userId = req.user.id;
     const doctorId = req.user.doctorId;
     const isDoctor = doctorId ? true : false;
+    console.log("Reschedule request by: ", isDoctor ? "Doctor" : "Patient");
 
     // Validate input
     if (!appointmentId || !newDate || !newStartTime) {
@@ -1636,7 +2120,7 @@ exports.rescheduleAppointment = async (req, res) => {
 
     // Check if the user has permission to reschedule
     if (isDoctor) {
-      if (existingAppointment.doctor.toString() !== doctorId) {
+      if (existingAppointment.doctor.toString() !== doctorId.toString()) {
         return res.status(403).send({ error: `You don't have permission to reschedule this appointment.` });
       }
     } else {
@@ -2594,7 +3078,7 @@ exports.getPatientFeedbackMetrics = async (req, res) => {
 // @desc    Submit a review for a completed appointment
 // @route   POST /appointments/:id/review
 // @access  Private/Patient
-exports.submitAppointmentReview = async (req, res, next) => {
+exports.submitAppointmentReview = async (req, res) => {
   try {
     const appointmentId = req.params.id;
     const patientId = req.user._id;
@@ -2607,7 +3091,7 @@ exports.submitAppointmentReview = async (req, res, next) => {
 
     // Validate input
     if (!rating || rating < 1 || rating > 5) {
-      return res.status(404).send({
+      return res.status(400).json({
         success: false,
         message: 'Please provide a valid rating between 1 and 5'
       });
@@ -2618,22 +3102,22 @@ exports.submitAppointmentReview = async (req, res, next) => {
       _id: appointmentId,
       patient: patientId,
       status: 'completed'
-    });
+    }).populate('doctor', 'fullName specializations');
 
     if (!appointment) {
-      return res.status(404).send({
+      return res.status(404).json({
         success: false,
         message: 'Completed appointment not found or you are not authorized to review this appointment'
       });
     }
 
-    // Check if review already exists
-    // if (appointment.review) {
-    //   return res.status(400).send({
-    //     success: false,
-    //     message: 'You have already submitted a review for this appointment'
-    //   });
-    // }
+    // Check if review already exists for this appointment
+    if (appointment.review && appointment.review.rating) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already submitted a review for this appointment'
+      });
+    }
 
     // Validate aspects if provided
     const validAspects = {};
@@ -2646,52 +3130,75 @@ exports.submitAppointmentReview = async (req, res, next) => {
     ];
 
     aspectFields.forEach(field => {
-      if (aspects[field] && aspects[field] >= 1 && aspects[field] <= 5) {
+      if (aspects[field] !== undefined && aspects[field] >= 1 && aspects[field] <= 5) {
         validAspects[field] = aspects[field];
       }
     });
 
     // Create review object
-    const review = {
+    const reviewData = {
       rating,
-      feedback: feedback || undefined,
+      feedback: feedback || '',
       aspects: validAspects,
-      isAnonymous,
       createdAt: new Date()
     };
 
     // Update appointment with review
-    const updatedAppointment = await Appointment.findByIdAndUpdate(
-      appointmentId,
-      { review },
-      { new: true, runValidators: true }
-    ).populate('doctor', 'fullname specialty');
+    appointment.review = reviewData;
+    await appointment.save();
 
-    // The post-save middleware will automatically update the doctor's average rating
+    // Update doctor's review count and average rating
+    const doctor = await Doctor.findById(appointment.doctor._id);
+
+    if (doctor) {
+      const currentCount = doctor.review.count || 0;
+      const currentAverage = doctor.review.averageRating || 0;
+
+      // Calculate new average rating
+      const newCount = currentCount + 1;
+      const newAverage = ((currentAverage * currentCount) + rating) / newCount;
+
+      // Update doctor's review stats
+      doctor.review = {
+        count: newCount,
+        averageRating: parseFloat(newAverage.toFixed(2))
+      };
+
+      await doctor.save();
+    }
 
     res.status(201).json({
       success: true,
       message: 'Thank you for your feedback!',
       data: {
         appointment: {
-          id: updatedAppointment._id,
-          date: updatedAppointment.date,
-          doctor: updatedAppointment.doctor
+          id: appointment._id,
+          date: appointment.date,
+          doctor: {
+            id: appointment.doctor._id,
+            fullName: appointment.doctor.fullName,
+            specializations: appointment.doctor.specializations
+          }
         },
         review: {
-          rating: updatedAppointment.review.rating,
-          isAnonymous: updatedAppointment.review.isAnonymous,
-          createdAt: updatedAppointment.review.createdAt
-        }
+          rating: appointment.review.rating,
+          feedback: appointment.review.feedback,
+          aspects: appointment.review.aspects,
+          createdAt: appointment.review.createdAt
+        },
+        doctorStats: doctor ? {
+          averageRating: doctor.review.averageRating,
+          totalReviews: doctor.review.count
+        } : undefined
       }
     });
 
   } catch (error) {
-    console.error("Error fetching patient feedback metrics:", error);
+    console.error('Error submitting review:', error);
     res.status(500).json({
       success: false,
-      error: "Internal server error",
-      message: error.message
+      message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

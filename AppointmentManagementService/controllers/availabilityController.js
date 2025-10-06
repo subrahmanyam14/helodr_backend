@@ -127,14 +127,14 @@ exports.getTodaySchedule = async (req, res) => {
       },
       status: { $in: ['pending', 'confirmed'] }
     })
-      .populate('patient', 'firstName lastName')
+      .populate('patient', 'fullName')
       .select('slot appointmentType patient status')
       .sort({ 'slot.startTime': 1 });
 
     const schedule = todayAppointments.map(apt => ({
       time: apt.slot.startTime,
       type: apt.appointmentType,
-      patient: apt.patient ? `${apt.patient.firstName} ${apt.patient.lastName}` : 'Unknown',
+      patient: apt.patient ?  apt.patient.fullName : 'Unknown',
       status: apt.status
     }));
 

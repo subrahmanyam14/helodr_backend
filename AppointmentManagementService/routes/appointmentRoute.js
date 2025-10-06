@@ -15,6 +15,12 @@ appointmentRouter.get('/:id', protect, appointmentController.getAppointment);
 // Update appointment status
 appointmentRouter.put('/:id/status', protect, appointmentController.updateAppointmentStatus);
 
+appointmentRouter.post('/:id/request-completion', protect, appointmentController.requestAppointmentCompletion);
+
+appointmentRouter.post('/:id/verify-completion', protect, appointmentController.verifyAppointmentCompletion);
+
+appointmentRouter.post('/:id/resend-completion-otp', protect, appointmentController.resendAppointmentCompletionOTP);
+
 // Add prescription to appointment
 appointmentRouter.put('/:id/prescription',
       protect,

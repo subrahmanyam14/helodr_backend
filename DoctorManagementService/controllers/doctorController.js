@@ -307,6 +307,302 @@ const DoctorController = {
     }
   },
 
+  updateDoctorBio: async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      const doctor = await Doctor.findOne({ user: userId });
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor profile not found'
+        });
+      }
+
+      const {
+        fullName,
+        title,
+        specializations,
+        qualifications,
+        experience,
+        languages,
+        bio,
+        address
+      } = req.body;
+
+      // Update User's fullName if provided
+      if (fullName !== undefined) {
+        const user = await User.findById(userId);
+        if (user) {
+          user.fullName = fullName;
+          await user.save();
+          doctor.fullName = fullName; // Update doctor's fullName too
+        }
+      }
+
+      // Update other bio fields
+      if (title !== undefined) doctor.title = title;
+      if (specializations !== undefined) doctor.specializations = specializations;
+      if (qualifications !== undefined) doctor.qualifications = qualifications;
+      if (experience !== undefined) doctor.experience = experience;
+      if (languages !== undefined) doctor.languages = languages;
+      if (bio !== undefined) doctor.bio = bio;
+
+      // Update address
+      if (address) {
+        doctor.address = {
+          street: address.street !== undefined ? address.street : doctor.address.street,
+          city: address.city !== undefined ? address.city : doctor.address.city,
+          state: address.state !== undefined ? address.state : doctor.address.state,
+          country: address.country !== undefined ? address.country : doctor.address.country,
+          pinCode: address.pinCode !== undefined ? address.pinCode : doctor.address.pinCode
+        };
+      }
+
+      await doctor.save();
+      await doctor.populate('user', 'fullName email phone');
+
+      res.status(200).json({
+        success: true,
+        message: 'Doctor bio updated successfully',
+        data: doctor
+      });
+
+    } catch (error) {
+      console.error('Error updating doctor bio:', error);
+
+      if (error.name === 'ValidationError') {
+        const errors = Object.values(error.errors).map(err => err.message);
+        return res.status(400).json({
+          success: false,
+          message: 'Validation error',
+          errors
+        });
+      }
+
+      if (error.code === 11000) {
+        const field = Object.keys(error.keyPattern)[0];
+        return res.status(400).json({
+          success: false,
+          message: `${field} already exists`
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        message: 'Server error while updating doctor bio',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
+
+  updateConsultationFees: async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      const doctor = await Doctor.findOne({ user: userId });
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor profile not found'
+        });
+      }
+
+      const { clinicConsultationFee, onlineConsultation } = req.body;
+
+      // Update clinic consultation fees
+      if (clinicConsultationFee) {
+        if (clinicConsultationFee.consultationFee !== undefined) {
+          doctor.clinicConsultationFee.consultationFee = clinicConsultationFee.consultationFee;
+        }
+        if (clinicConsultationFee.followUpFee !== undefined) {
+          doctor.clinicConsultationFee.followUpFee = clinicConsultationFee.followUpFee;
+        }
+      }
+
+      // Update online consultation fees
+      if (onlineConsultation) {
+        if (onlineConsultation.consultationFee !== undefined) {
+          doctor.onlineConsultation.consultationFee = onlineConsultation.consultationFee;
+        }
+        if (onlineConsultation.followUpFee !== undefined) {
+          doctor.onlineConsultation.followUpFee = onlineConsultation.followUpFee;
+        }
+      }
+
+      await doctor.save();
+      await doctor.populate('user', 'fullName email phone');
+
+      res.status(200).json({
+        success: true,
+        message: 'Consultation fees updated successfully',
+        data: {
+          clinicConsultationFee: doctor.clinicConsultationFee,
+          onlineConsultation: doctor.onlineConsultation
+        }
+      });
+
+    } catch (error) {
+      console.error('Error updating consultation fees:', error);
+
+      if (error.name === 'ValidationError') {
+        const errors = Object.values(error.errors).map(err => err.message);
+        return res.status(400).json({
+          success: false,
+          message: 'Validation error',
+          errors
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        message: 'Server error while updating consultation fees',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
+
+  endHospitalAffiliation: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { affiliationId } = req.params;
+
+      const doctor = await Doctor.findOne({ user: userId });
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor profile not found'
+        });
+      }
+
+      // Find the affiliation
+      const affiliation = doctor.hospitalAffiliations.id(affiliationId);
+
+      if (!affiliation) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital affiliation not found'
+        });
+      }
+
+      // Update status to false and set end date from server
+      affiliation.currentlyWorking = false;
+      affiliation.to = new Date(); // Server date
+
+      await doctor.save();
+      await doctor.populate('hospitalAffiliations.hospital', 'name address');
+
+      res.status(200).json({
+        success: true,
+        message: 'Hospital affiliation ended successfully',
+        data: affiliation
+      });
+
+    } catch (error) {
+      console.error('Error ending hospital affiliation:', error);
+
+      if (error.name === 'CastError') {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid affiliation ID format'
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        message: 'Server error while updating hospital affiliation',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
+
+  updateMeetingLink: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { meetingLink } = req.body;
+
+      if (!meetingLink) {
+        return res.status(400).json({
+          success: false,
+          message: 'Meeting link is required'
+        });
+      }
+
+      // Basic URL validation
+      const urlPattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
+      if (!urlPattern.test(meetingLink)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid meeting link URL'
+        });
+      }
+
+      const doctor = await Doctor.findOne({ user: userId });
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor profile not found'
+        });
+      }
+
+      doctor.meetingLink = meetingLink;
+      await doctor.save();
+      await doctor.populate('user', 'fullName email phone');
+
+      res.status(200).json({
+        success: true,
+        message: 'Meeting link updated successfully',
+        data: {
+          meetingLink: doctor.meetingLink
+        }
+      });
+
+    } catch (error) {
+      console.error('Error updating meeting link:', error);
+
+      res.status(500).json({
+        success: false,
+        message: 'Server error while updating meeting link',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
+
+  getMyDoctorProfile: async (req, res) => {
+    try {
+      const userId = req.user.id;
+
+      const doctor = await Doctor.findOne({ user: userId })
+        .populate('user', 'fullName email phone profilePicture')
+        .populate('hospitalAffiliations.hospital', 'name address contactNumber');
+
+      if (!doctor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor profile not found'
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: doctor
+      });
+
+    } catch (error) {
+      console.error('Error fetching doctor profile:', error);
+
+      res.status(500).json({
+        success: false,
+        message: 'Server error while fetching doctor profile',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  },
+
   // Ad d or update hospital affiliations
   addHospitalAffiliation: async (req, res) => {
     try {

@@ -27,7 +27,9 @@ const notificationSchema = new mongoose.Schema({
             "appointment_reminder_10-min", 
             "appointment_reschedule", 
             "payment_confirmation", 
-            "refund_initiate"
+            "refund_initiate",
+            "appointment_completion_request",
+            "appointment_completed"
         ],
         required: true
     },

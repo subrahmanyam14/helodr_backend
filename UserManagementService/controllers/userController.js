@@ -37,7 +37,7 @@ exports.login = async (req, res) => {
     // Find user by email or mobile
     const user = await User.findOne({
       $or: [{ mobileNumber: emailOrMobile }, { email: emailOrMobile }]
-    }).select('password role mobileNumber fullName countryCode email isMobileVerified isEmailVerified _id doctorId hospitalId');
+    }).select('password role mobileNumber fullName countryCode email isMobileVerified isEmailVerified _id doctorId hospitalId profilePhoto');
     // console.log(user);
 
     if (!user) {
