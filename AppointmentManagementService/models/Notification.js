@@ -29,7 +29,8 @@ const notificationSchema = new mongoose.Schema({
             "payment_confirmation", 
             "refund_initiate",
             "appointment_completion_request",
-            "appointment_completed"
+            "appointment_completed",
+            "prescription_added"
         ],
         required: true
     },

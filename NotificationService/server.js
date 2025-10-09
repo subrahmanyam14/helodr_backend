@@ -8,6 +8,8 @@ const { initAppointmentNotificationService } = require("./services/appointmentNo
 const { initNotificationMonitorService } = require("./services/notificationMonitorService");
 const Notification = require("./models/Notification");
 const meetingRoutes = require('./route/meetingRoutes');
+const webNotificationRoutes = require('./route/webNotificationRoutes');
+const schedulerService = require('./services/SchedulerService');
 
 app.use(express.json());
 
@@ -72,6 +74,10 @@ app.post("/notifications", async(req, res) => {
   }
 });
 
+app.use('/web-notifications', webNotificationRoutes);
+
+
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).send({
@@ -92,6 +98,7 @@ app.listen(PORT, async() => {
   startNotificationListener();
   initNotificationMonitorService(); // Initialize the new notification monitor service
   initAppointmentNotificationService();
+  schedulerService.scheduleDailyCleanup(2, 0); // Schedule daily cleanup at 2 AM
   
   console.log(`✅ All services initialized successfully!`);
 });

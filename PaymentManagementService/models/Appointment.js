@@ -62,9 +62,10 @@ const appointmentSchema = new mongoose.Schema({
     }
   }], 
   healthRecord: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "HealthRecord"
-  },
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: "HealthRecord",
+      default: []
+    },
   prescription: {
     diagnosis: String,
     medicines: [{
@@ -74,7 +75,7 @@ const appointmentSchema = new mongoose.Schema({
       notes: String
     }],
     tests: [String],
-    advice: String,
+    advice: [String],
     followUpDate: Date
   },
   review: {

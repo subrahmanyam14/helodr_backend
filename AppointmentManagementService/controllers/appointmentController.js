@@ -623,7 +623,7 @@ exports.getAppointments = async (req, res) => {
         ]
       })
       .populate('patient', 'fullName profilePhoto')
-      .select('-reminders -prescription')
+      .select('-reminders ')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -1202,7 +1202,8 @@ exports.resendAppointmentCompletionOTP = async (req, res) => {
 
 exports.addPrescription = async (req, res) => {
   try {
-    const { doctorId, diagnosis, medicines, tests, advice, followUpDate } = req.body;
+    const { doctorId } = req.user;
+    const { diagnosis, medicines, tests, advice, followUpDate } = req.body;
 
     const appointment = await Appointment.findOneAndUpdate(
       {

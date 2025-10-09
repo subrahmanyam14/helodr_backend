@@ -42,7 +42,7 @@ const appointmentSchema = new mongoose.Schema({
   payment: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Payment"
-  }, 
+  },
   rescheduledFrom: [{
     startTime: {
       type: String,
@@ -53,17 +53,18 @@ const appointmentSchema = new mongoose.Schema({
       required: true
     },
     previousDate: {
-       type: Date,
-    required: true
-    } ,
-    rescheduleBy:{
+      type: Date,
+      required: true
+    },
+    rescheduleBy: {
       type: String,
-      enum:["patient", "doctor"]
+      enum: ["patient", "doctor"]
     }
-  }], 
+  }],
   healthRecord: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "HealthRecord"
+    type: [mongoose.Schema.Types.ObjectId],
+    ref: "HealthRecord",
+    default: []
   },
   prescription: {
     diagnosis: String,
@@ -74,7 +75,7 @@ const appointmentSchema = new mongoose.Schema({
       notes: String
     }],
     tests: [String],
-    advice: String,
+    advice: [String],
     followUpDate: Date
   },
   review: {
@@ -139,7 +140,7 @@ const appointmentSchema = new mongoose.Schema({
     sentAt: Date,
     status: String
   }],
-  
+
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -147,15 +148,15 @@ const appointmentSchema = new mongoose.Schema({
 });
 
 // Middleware to update doctor's average rating when a review is added
-appointmentSchema.post('save', async function(doc) {
+appointmentSchema.post('save', async function (doc) {
   if (doc.review && doc.review.rating) {
     const Doctor = mongoose.model('Doctor');
     const doctor = await Doctor.findById(doc.doctor);
-    
+
     if (doctor) {
       const totalRatings = doctor.totalRatings + 1;
       const newAverage = ((doctor.averageRating * doctor.totalRatings) + doc.review.rating) / totalRatings;
-      
+
       await Doctor.findByIdAndUpdate(doc.doctor, {
         averageRating: newAverage,
         totalRatings: totalRatings
@@ -165,7 +166,7 @@ appointmentSchema.post('save', async function(doc) {
 });
 
 // Post-update hook to check for completion and process earning
-appointmentSchema.post('findOneAndUpdate', async function(doc) {
+appointmentSchema.post('findOneAndUpdate', async function (doc) {
   if (doc && doc.status === "completed") {
     const UpcomingEarnings = mongoose.model("UpcomingEarnings");
 
@@ -187,7 +188,7 @@ appointmentSchema.post('findOneAndUpdate', async function(doc) {
 
 
 // Virtual for appointment duration
-appointmentSchema.virtual('duration').get(function() {
+appointmentSchema.virtual('duration').get(function () {
   const start = new Date(`1970-01-01T${this.slot.startTime}Z`);
   const end = new Date(`1970-01-01T${this.slot.endTime}Z`);
   return (end - start) / (1000 * 60); // duration in minutes
