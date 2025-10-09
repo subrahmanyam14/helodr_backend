@@ -87,4 +87,12 @@ appointmentRouter.get('/doctor/dashboard', protect, authorize('doctor'), appoint
 appointmentRouter.get('/doctor/appoinments', protect, authorize('doctor'), appointmentController.getAppointmentsByPagination);
 
 appointmentRouter.get('/doctor/getLastSixWeeksAppoinmentsTrend', protect, authorize('doctor'), appointmentController.getLastSixWeeksAppointmentsTrend);
+
+appointmentRouter.get('/appointment/health-records/:appointmentId', protect, authorize('doctor'), appointmentController.getHealthRecords);
+
+appointmentRouter.post('/appointment/health-records', protect, authorize('doctor'), appointmentController.createHealthRecord);
+
+appointmentRouter.put('/appointment/health-records/:recordId', protect, authorize('doctor'), appointmentController.updateHealthRecord);
+
+appointmentRouter.delete('/appointment/health-records/:recordId', protect, authorize('doctor'), appointmentController.deleteHealthRecord);
 module.exports = appointmentRouter;

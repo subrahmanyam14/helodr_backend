@@ -7,7 +7,6 @@ const Doctor = require('../models/Doctor'); // Added missing import
 const Hospital = require("../models/Hospital");
 const mongoose = require('mongoose');
 const User = require('../models/User');
-const Statistics = require("../models/Statistics");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 const Wallet = require("../models/Wallet");
 const HealthRecord = require("../models/HealthRecords");
@@ -3902,7 +3901,288 @@ exports.getLastSixWeeksAppointmentsTrend = async (req, res) => {
 };
 
 
+exports.getHealthRecords = async (req, res) => {
+  try {
+    const { appointmentId } = req.params;
+    
+    // Validate appointmentId
+    if (!appointmentId) {
+      return res.status(400).json({ message: "Appointment ID is required" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
+      return res.status(400).json({ message: "Invalid appointment ID format" });
+    }
+
+    // Find health records by appointment_id with population
+    const healthRecords = await HealthRecord.find({ 
+      appointment_id: appointmentId 
+    })
+    .populate({
+      path: 'user_id',
+      select: 'name email phone' // Select specific fields from User model
+    })
+    .populate({
+      path: 'appointment_id',
+      select: 'date time doctor_id' // Select specific fields from Appointment model
+    })
+    .sort({ createdAt: -1 });
+
+    // Return response (even if empty array)
+    res.status(200).json({
+      success: true,
+      message: healthRecords.length > 0 
+        ? "Health records retrieved successfully" 
+        : "No health records found for this appointment",
+      data: healthRecords,
+      count: healthRecords.length
+    });
+
+  } catch (error) {
+    console.error("Error fetching health records:", error);
+    
+    // More specific error handling
+    if (error.name === 'CastError') {
+      return res.status(400).json({ 
+        message: "Invalid appointment ID format" 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false,
+      message: "Internal server error while fetching health records",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+}
+
+
+exports.createHealthRecord = async (req, res) => {
+  try {
+    const { appointment_id, user_id, record_type, file_urls, description } = req.body;
+
+    // Validate required fields
+    if (!appointment_id || !user_id || !record_type) {
+      return res.status(400).json({
+        success: false,
+        message: "appointment_id, user_id, and record_type are required fields"
+      });
+    }
+
+    // Validate ObjectId formats
+    if (!mongoose.Types.ObjectId.isValid(appointment_id) || !mongoose.Types.ObjectId.isValid(user_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid appointment_id or user_id format"
+      });
+    }
+
+    // Validate record_type enum
+    const validRecordTypes = ["prescription", "report", "image", "other"];
+    if (!validRecordTypes.includes(record_type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid record_type. Must be one of: prescription, report, image, other"
+      });
+    }
+
+    // Create new health record
+    const newHealthRecord = new HealthRecord({
+      appointment_id,
+      user_id,
+      record_type,
+      file_urls: file_urls || [],
+      description: description || ""
+    });
+
+    // Save to database
+    const savedRecord = await newHealthRecord.save();
+
+    // Populate the saved record for response
+    const populatedRecord = await HealthRecord.findById(savedRecord._id)
+      .populate('user_id', 'name email')
+      .populate('appointment_id', 'date time doctor_id');
+
+    res.status(201).json({
+      success: true,
+      message: "Health record created successfully",
+      data: populatedRecord
+    });
+
+  } catch (error) {
+    console.error("Error creating health record:", error);
+    
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        error: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: "Error creating health record",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 
 
 
+exports.updateHealthRecord = async (req, res) => {
+  try {
+    const { recordId } = req.params;
+    const { record_type, file_urls, description } = req.body;
+
+    // Validate recordId
+    if (!recordId || !mongoose.Types.ObjectId.isValid(recordId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid health record ID is required"
+      });
+    }
+
+    // Check if record exists
+    const existingRecord = await HealthRecord.findById(recordId);
+    if (!existingRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Health record not found"
+      });
+    }
+
+    // Prepare update data
+    const updateData = {};
+    if (record_type) {
+      // Validate record_type if provided
+      const validRecordTypes = ["prescription", "report", "image", "other"];
+      if (!validRecordTypes.includes(record_type)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid record_type. Must be one of: prescription, report, image, other"
+        });
+      }
+      updateData.record_type = record_type;
+    }
+
+    if (file_urls !== undefined) {
+      updateData.file_urls = file_urls;
+    }
+
+    if (description !== undefined) {
+      updateData.description = description;
+    }
+
+    // Update the record
+    const updatedRecord = await HealthRecord.findByIdAndUpdate(
+      recordId,
+      { $set: updateData },
+      { 
+        new: true, // Return updated document
+        runValidators: true // Run model validators
+      }
+    ).populate('user_id', 'name email')
+     .populate('appointment_id', 'date time doctor_id');
+
+    res.status(200).json({
+      success: true,
+      message: "Health record updated successfully",
+      data: updatedRecord
+    });
+
+  } catch (error) {
+    console.error("Error updating health record:", error);
+    
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        error: error.message
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: "Error updating health record",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
+exports.getHealthRecordById = async (req, res) => {
+  try {
+    const { recordId } = req.params;
+
+    if (!recordId || !mongoose.Types.ObjectId.isValid(recordId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid health record ID is required"
+      });
+    }
+
+    const healthRecord = await HealthRecord.findById(recordId)
+      .populate('user_id', 'name email phone')
+      .populate('appointment_id', 'date time doctor_id status');
+
+    if (!healthRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Health record not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Health record retrieved successfully",
+      data: healthRecord
+    });
+
+  } catch (error) {
+    console.error("Error fetching health record:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching health record",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
+exports.deleteHealthRecord = async (req, res) => {
+  try {
+    const { recordId } = req.params;
+
+    if (!recordId || !mongoose.Types.ObjectId.isValid(recordId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid health record ID is required"
+      });
+    }
+
+    const deletedRecord = await HealthRecord.findByIdAndDelete(recordId);
+
+    if (!deletedRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Health record not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Health record deleted successfully",
+      data: deletedRecord
+    });
+
+  } catch (error) {
+    console.error("Error deleting health record:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error deleting health record",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 
