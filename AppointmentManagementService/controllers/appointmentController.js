@@ -1585,7 +1585,7 @@ exports.getDoctorPatientById = async (req, res) => {
     const [patient, appointments, healthRecords] = await Promise.all([
       User.findOne({
         _id: patientId,
-        role: "patient"
+        // role: "patient"
       })
         .select('-password'), // Exclude password from response
 
