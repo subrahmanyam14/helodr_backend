@@ -65,5 +65,35 @@ router.get(
   transactionController.getPaymentDashboard
 );
 
+// Doctor transaction routes
+router.get(
+  "/doctor/transactions/credited",
+  protect,
+  authorize("doctor"),
+  transactionController.getDoctorCreditedTransactions
+);
+
+router.get(
+  "/doctor/transactions/analysis",
+  protect,
+  authorize("doctor"),
+  transactionController.getDoctorTransactionAnalysis
+);
+
+router.get(
+  "/doctor/transactions/available",
+  protect,
+  authorize("doctor"),
+  transactionController.getAvailableForWithdrawal
+);
+
+router.get(
+  "/doctor/transactions/history",
+  protect,
+  authorize("doctor"),
+  transactionController.getTransactionHistory
+);
+
+
 
 module.exports = router;

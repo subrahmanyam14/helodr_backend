@@ -14,6 +14,7 @@ app.use('/doctors', doctorRoutes);
 app.use('/reviews', reviewRoutes);
 app.use('/affiliation', affiliationRequestRoutes);
 
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
