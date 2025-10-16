@@ -75,7 +75,11 @@ const hospitalSchema = new mongoose.Schema({
       enum: ["pending", "verified", "rejected"],
       default: "pending"
     },
-    verifiedAt: Date
+    verifiedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    }
   },
 
   // Media
@@ -99,10 +103,10 @@ const hospitalSchema = new mongoose.Schema({
 // });
 
 // Methods
-hospitalSchema.methods.updateRating = async function(newRating) {
+hospitalSchema.methods.updateRating = async function (newRating) {
   const totalRatings = this.statistics.totalRatings + 1;
   const newAverage = ((this.statistics.averageRating * this.statistics.totalRatings) + newRating) / totalRatings;
-  
+
   this.statistics.averageRating = newAverage;
   this.statistics.totalRatings = totalRatings;
   await this.save();

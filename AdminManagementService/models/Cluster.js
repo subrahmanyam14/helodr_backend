@@ -29,13 +29,13 @@ const clusterSchema = new mongoose.Schema({
         default: 50, // in meters
         min: 10      // minimum radius
     },
-    doctors: {
+    hospitals: {
         type: [{
             type: mongoose.Schema.Types.ObjectId,
-            ref: "User"
+            ref: "Hospital"
         }],
         default: [],
-        validate: [arrayLimit, '{PATH} exceeds the limit of 100 doctors'] // Add doctor limit
+        validate: [arrayLimit, '{PATH} exceeds the limit of 50 hospitals'] // Adjusted limit for hospitals
     },
     isActive: {
         type: Boolean,
@@ -47,9 +47,9 @@ const clusterSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
-// Validate doctors array length
+// Validate hospitals array length
 function arrayLimit(val) {
-    return val.length <= 100;
+    return val.length <= 50;
 }
 
 // Create geospatial index
@@ -64,6 +64,43 @@ clusterSchema.virtual('latitude').get(function() {
 clusterSchema.virtual('longitude').get(function() {
     return this.location.coordinates[0];
 });
+
+// Virtual to populate hospitals
+clusterSchema.virtual('hospitalDetails', {
+    ref: 'Hospital',
+    localField: 'hospitals',
+    foreignField: '_id'
+});
+
+// Instance method to add hospital to cluster
+clusterSchema.methods.addHospital = function(hospitalId) {
+    if (!this.hospitals.includes(hospitalId)) {
+        this.hospitals.push(hospitalId);
+    }
+    return this.save();
+};
+
+// Instance method to remove hospital from cluster
+clusterSchema.methods.removeHospital = function(hospitalId) {
+    this.hospitals = this.hospitals.filter(id => !id.equals(hospitalId));
+    return this.save();
+};
+
+// Static method to find clusters near a location
+clusterSchema.statics.findNearby = function(coordinates, maxDistance = 5000) {
+    return this.find({
+        location: {
+            $near: {
+                $geometry: {
+                    type: "Point",
+                    coordinates: coordinates
+                },
+                $maxDistance: maxDistance
+            }
+        },
+        isActive: true
+    }).populate('hospitals');
+};
 
 const Cluster = mongoose.model("Cluster", clusterSchema);
 

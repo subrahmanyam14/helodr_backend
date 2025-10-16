@@ -75,7 +75,11 @@ const hospitalSchema = new mongoose.Schema({
       enum: ["pending", "verified", "rejected"],
       default: "pending"
     },
-    verifiedAt: Date
+    verifiedAt: Date,
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    }
   },
 
   // Media

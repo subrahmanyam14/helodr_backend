@@ -1,4 +1,5 @@
 const Cluster = require('../models/Cluster');
+const Hospital = require('../models/Hospital');
 const mongoose = require('mongoose');
 
 // Create a new cluster
@@ -7,7 +8,7 @@ exports.createCluster = async (req, res) => {
     session.startTransaction();
     
     try {
-        const { user, clusterName, latitude, longitude, radius = 50 } = req.body;
+        const { user, clusterName, latitude, longitude, radius = 50000 } = req.body; // Default radius 50km
 
         // Validate coordinates
         if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
@@ -29,7 +30,7 @@ exports.createCluster = async (req, res) => {
             clusterName,
             location: {
                 type: "Point",
-                coordinates: [longitude, latitude] // GeoJSON format: [long, lat]
+                coordinates: [parseFloat(longitude), parseFloat(latitude)] // GeoJSON format: [long, lat]
             },
             radius
         });
@@ -65,8 +66,8 @@ exports.getAllClusters = async (req, res) => {
         const clusters = await Cluster.find()
             .skip(skip)
             .limit(limit)
-            .populate('user', 'name email') // Only select necessary fields
-            .populate('doctors', 'name specialty')
+            .populate('user', 'name email')
+            .populate('hospitals', 'name type address specialties') // Populate hospital details
             .lean();
 
         const total = await Cluster.countDocuments();
@@ -96,7 +97,7 @@ exports.getClusterByUserId = async (req, res) => {
     try {
         const cluster = await Cluster.findOne({ user: req.params.userId })
             .populate('user', 'name email')
-            .populate('doctors', 'name specialty');
+            .populate('hospitals', 'name type address specialties facilities contact services statistics'); // Detailed hospital info
 
         if (!cluster) {
             return res.status(404).json({ 
@@ -134,7 +135,7 @@ exports.updateCluster = async (req, res) => {
         if (latitude && longitude) {
             updates.location = {
                 type: "Point",
-                coordinates: [longitude, latitude]
+                coordinates: [parseFloat(longitude), parseFloat(latitude)]
             };
         }
 
@@ -142,7 +143,7 @@ exports.updateCluster = async (req, res) => {
             req.params.id,
             updates,
             { new: true, session }
-        ).populate('user').populate('doctors');
+        ).populate('user').populate('hospitals');
 
         if (!updatedCluster) {
             await session.abortTransaction();
@@ -211,7 +212,7 @@ exports.deleteCluster = async (req, res) => {
 // Find nearest clusters to a point
 exports.findNearbyClusters = async (req, res) => {
     try {
-        const { longitude, latitude, maxDistance = 5000 } = req.query; // maxDistance in meters
+        const { longitude, latitude, maxDistance = 500000 } = req.query; // maxDistance in meters (500km default)
 
         if (!longitude || !latitude) {
             return res.status(400).json({
@@ -231,7 +232,9 @@ exports.findNearbyClusters = async (req, res) => {
                 }
             },
             isActive: true
-        }).populate('user', 'name');
+        })
+        .populate('user', 'name')
+        .populate('hospitals', 'name type address.city address.state specialties');
 
         res.status(200).json({
             success: true,
@@ -248,16 +251,273 @@ exports.findNearbyClusters = async (req, res) => {
     }
 };
 
+// Add hospital to cluster
+// Add hospital to cluster
+exports.addHospitalToCluster = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
+    try {
+        const { clusterId, hospitalId } = req.params;
 
+        const cluster = await Cluster.findById(clusterId).session(session);
+        if (!cluster) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                success: false,
+                message: 'Cluster not found'
+            });
+        }
 
-////reqbody
+        const hospital = await Hospital.findById(hospitalId).session(session);
+        if (!hospital) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                success: false,
+                message: 'Hospital not found'
+            });
+        }
 
+        // Check if hospital is already in cluster
+        if (cluster.hospitals.includes(hospitalId)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                message: 'Hospital already exists in this cluster'
+            });
+        }
 
-// {
-//     "user": "65d5f8a1c4b3e12a7f8b4567",
-//     "clusterName": "Downtown Medical Cluster",
-//     "latitude": 40.7128,
-//     "longitude": -74.0060,
-//     "radius": 100
-//   }
+        // Check hospital limit
+        if (cluster.hospitals.length >= 50) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                message: 'Cluster has reached maximum hospital limit (50)'
+            });
+        }
+
+        // Add hospital to cluster
+        await cluster.addHospital(hospitalId);
+
+        // Add cluster to hospital's clusters array - FIXED
+        if (!hospital.clusters) {
+            hospital.clusters = []; // Initialize if undefined
+        }
+        hospital.clusters.push(clusterId);
+        await hospital.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        const updatedCluster = await Cluster.findById(clusterId)
+            .populate('hospitals', 'name type address specialties');
+
+        res.status(200).json({
+            success: true,
+            message: 'Hospital added to cluster successfully',
+            cluster: updatedCluster
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error('Add hospital to cluster error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: error.message
+        });
+    }
+};
+
+// Remove hospital from cluster
+exports.removeHospitalFromCluster = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { clusterId, hospitalId } = req.params;
+
+        const cluster = await Cluster.findById(clusterId).session(session);
+        if (!cluster) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                success: false,
+                message: 'Cluster not found'
+            });
+        }
+
+        const hospital = await Hospital.findById(hospitalId).session(session);
+        if (!hospital) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                success: false,
+                message: 'Hospital not found'
+            });
+        }
+
+        // Check if hospital exists in cluster
+        if (!cluster.hospitals.includes(hospitalId)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                message: 'Hospital not found in this cluster'
+            });
+        }
+
+        // Remove hospital from cluster
+        await cluster.removeHospital(hospitalId);
+
+        // Remove cluster from hospital's clusters array
+        hospital.clusters = hospital.clusters.filter(id => !id.equals(clusterId));
+        await hospital.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        const updatedCluster = await Cluster.findById(clusterId)
+            .populate('hospitals', 'name type address specialties');
+
+        res.status(200).json({
+            success: true,
+            message: 'Hospital removed from cluster successfully',
+            cluster: updatedCluster
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error('Remove hospital from cluster error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: error.message
+        });
+    }
+};
+
+// Find hospitals within cluster radius
+exports.getHospitalsInCluster = async (req, res) => {
+    try {
+        const cluster = await Cluster.findById(req.params.clusterId)
+            .populate('hospitals', 'name type address specialties facilities contact services statistics');
+
+        if (!cluster) {
+            return res.status(404).json({
+                success: false,
+                message: 'Cluster not found'
+            });
+        }
+
+        // Find nearby hospitals within cluster radius (optional - for discovering new hospitals)
+        const nearbyHospitals = await Hospital.findNearby(
+            cluster.location.coordinates,
+            cluster.radius
+        );
+
+        res.status(200).json({
+            success: true,
+            clusterHospitals: cluster.hospitals,
+            nearbyHospitals: nearbyHospitals.filter(hospital => 
+                !cluster.hospitals.some(clusterHospital => 
+                    clusterHospital._id.equals(hospital._id)
+                )
+            ),
+            clusterInfo: {
+                name: cluster.clusterName,
+                radius: cluster.radius,
+                location: cluster.location
+            }
+        });
+
+    } catch (error) {
+        console.error('Get hospitals in cluster error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: error.message
+        });
+    }
+};
+
+// Auto-populate cluster with nearby hospitals
+exports.autoPopulateCluster = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const cluster = await Cluster.findById(req.params.clusterId).session(session);
+        if (!cluster) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                success: false,
+                message: 'Cluster not found'
+            });
+        }
+
+        // Find verified hospitals within cluster radius
+        const nearbyHospitals = await Hospital.find({
+            'address.coordinates': {
+                $near: {
+                    $geometry: {
+                        type: "Point",
+                        coordinates: cluster.location.coordinates
+                    },
+                    $maxDistance: cluster.radius
+                }
+            },
+            'verification.status': 'verified'
+        }).session(session);
+
+        let addedCount = 0;
+        for (const hospital of nearbyHospitals) {
+            if (cluster.hospitals.length >= 50) break; // Respect limit
+            
+            if (!cluster.hospitals.includes(hospital._id)) {
+                await cluster.addHospital(hospital._id);
+                
+                // Add cluster to hospital's clusters array
+                if (!hospital.clusters.includes(cluster._id)) {
+                    hospital.clusters.push(cluster._id);
+                    await hospital.save({ session });
+                }
+                
+                addedCount++;
+            }
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+
+        const updatedCluster = await Cluster.findById(cluster._id)
+            .populate('hospitals', 'name type address specialties');
+
+        res.status(200).json({
+            success: true,
+            message: `Added ${addedCount} hospitals to cluster`,
+            cluster: updatedCluster,
+            stats: {
+                added: addedCount,
+                total: updatedCluster.hospitals.length
+            }
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error('Auto-populate cluster error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: error.message
+        });
+    }
+};
