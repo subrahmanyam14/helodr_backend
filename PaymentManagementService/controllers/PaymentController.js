@@ -3,11 +3,13 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Payment = require("../models/Payment");
 const Transaction = require("../models/Transaction");
-const Notification = require("../models/Notification");
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 const Appointment = require("../models/Appointment");
+const Doctor = require("../models/Doctor");
+const User = require("../models/User");
 const RefundService = require("../services/refundService")
 const Wallet = require("../models/Wallet");
+const { queuePaymentNotification } = require("../services/paymentNotificationService");
 
 require("dotenv").config();
 
@@ -18,10 +20,43 @@ const razorpay = new Razorpay({
 
 // STEP 1: Create Razorpay Order
 const createRazorpayOrder = async (req, res) => {
-  const { amount } = req.body;
+  const { appointmentId } = req.body;
 
   try {
-    const baseAmount = parseInt(amount);
+    // Fetch appointment by ID
+    const appointment = await Appointment.findById(appointmentId)
+      .populate('doctor')
+      .populate('patient');
+
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: "Appointment not found"
+      });
+    }
+
+    // Determine the amount based on appointment type
+    let baseAmount;
+    if (appointment.appointmentType === 'clinic') {
+      baseAmount = appointment.doctor.clinicConsultationFee.consultationFee;
+    } else if (appointment.appointmentType === 'online') {
+      baseAmount = appointment.doctor.onlineConsultation.consultationFee;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid appointment type"
+      });
+    }
+
+    // Check if amount is valid
+    if (!baseAmount || baseAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid consultation fee amount"
+      });
+    }
+
+    // Calculate total amount with GST (18%)
     const gstAmount = Math.round(baseAmount * 18 / 100);
     const totalAmount = baseAmount + gstAmount;
 
@@ -29,31 +64,52 @@ const createRazorpayOrder = async (req, res) => {
       amount: totalAmount * 100, // Razorpay uses paisa
       currency: "INR",
       receipt: `receipt_order_${Date.now()}`,
-      method: 'upi', // Specify UPI as the payment method
       notes: {
-        description: 'Appointment Booking Payment'
-      },
-      upi: {
-        flow: 'qr', // Request QR code flow
+        description: `${appointment.appointmentType.toUpperCase()} Appointment Booking Payment`,
+        appointmentId: appointmentId.toString(),
+        patientId: appointment.patient._id.toString(),
+        doctorId: appointment.doctor._id.toString()
       }
+      // Removed method and upi fields - they are not allowed in backend order creation
     };
 
     const order = await razorpay.orders.create(options);
 
-    // The QR code URL will be in the order response
-    const qrCodeUrl = order.upi.qr_code;
+    // Update appointment with payment details
+    appointment.paymentDetails = {
+      razorpayOrderId: order.id,
+      amount: totalAmount,
+      status: 'pending'
+    };
+    await appointment.save();
+
+    // Prepare patient details
+    const patientDetails = {
+      mobileNumber: appointment.patient.mobileNumber,
+      email: appointment.patient.email,
+      fullName: appointment.patient.fullName
+    };
 
     res.status(200).json({
       success: true,
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      qrCodeUrl: qrCodeUrl, // Send QR code URL to frontend
-      upiDeepLink: order.upi.intent_url // Also send UPI deep link for apps
+      key: process.env.KEY_ID, // Send key for frontend
+      appointmentType: appointment.appointmentType,
+      baseAmount: baseAmount,
+      gstAmount: gstAmount,
+      totalAmount: totalAmount,
+      receipt: order.receipt,
+      patientDetails: patientDetails // Add patient details to response
     });
   } catch (error) {
     console.error("Razorpay Order Creation Error:", error);
-    res.status(500).json({ success: false, message: "Failed to create order" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to create order",
+      error: error.message
+    });
   }
 };
 
@@ -80,7 +136,7 @@ const checkPaymentStatus = async (req, res) => {
   }
 };
 
-// STEP 2: Verify and Capture Payment
+// STEP 2: Verify and Capture Payment (Updated with Notification)
 const verifyRazorpayPayment = async (req, res) => {
   const {
     razorpay_order_id,
@@ -155,15 +211,70 @@ const verifyRazorpayPayment = async (req, res) => {
     // Use the createPayment method which now handles upcoming earnings
     const paymentDoc = await Payment.createPayment(paymentData, appointment.date);
 
-
     // Update appointment status
     appointment.status = "confirmed";
-    appointment.videoConferenceLink = appointment.appointmentType === 'video'? appointment.doctor.meetingLink: ""
+    appointment.videoConferenceLink = appointment.appointmentType === 'video' ? appointment.doctor.meetingLink : ""
     appointment.payment = paymentDoc._id;
     await appointment.save({ session });
 
     await session.commitTransaction();
     session.endSession();
+
+    // Queue payment notification after successful transaction
+    const notificationData = {
+      paymentData: {
+        patientId,
+        doctorId,
+        paymentId: paymentDoc._id.toString(),
+        totalAmount: totalAmount,
+        baseAmount: baseAmount,
+        gstAmount: gstAmount
+      },
+      transactionData: {
+        transactionId: razorpay_payment_id,
+        amount: totalAmount
+      },
+      appointmentData: {
+        appointmentId,
+        date: appointment.date,
+        type: appointment.appointmentType
+      }
+    };
+
+    await queuePaymentNotification(
+      notificationData.paymentData,
+      notificationData.transactionData,
+      notificationData.appointmentData
+    );
+
+    // Queue payment notification after successful transaction
+    const appointmentNotificationData = {
+      paymentData: {
+        patientId,
+        doctorId,
+        paymentId: paymentDoc._id.toString(),
+        totalAmount: totalAmount,
+        baseAmount: baseAmount,
+        gstAmount: gstAmount
+      },
+      transactionData: {
+        transactionId: razorpay_payment_id,
+        amount: totalAmount
+      },
+      appointmentData: {
+        appointmentId,
+        date: appointment.date,
+        type: appointment.appointmentType,
+        slot: appointment.slot, // Include slot information
+        doctorName: appointment.doctor.fullName // Include doctor name
+      }
+    };
+
+    await queuePaymentNotification(
+      appointmentNotificationData.paymentData,
+      appointmentNotificationData.transactionData,
+      appointmentNotificationData.appointmentData
+    );
 
     res.status(200).json({
       success: true,
@@ -185,7 +296,7 @@ const verifyRazorpayPayment = async (req, res) => {
   }
 };
 
-// Create dummy payment (for testing purposes)
+// Create dummy payment (for testing purposes) - Updated with Notification
 const createDummyPayment = async (req, res) => {
   const {
     razorpay_order_id,
@@ -205,6 +316,7 @@ const createDummyPayment = async (req, res) => {
     if (!appointment) {
       return res.status(404).send({ error: "Appointment not found" });
     }
+
     // Use the static method to create the payment and handle all related logic
     const payment = await Payment.createPayment({
       appointment: appointmentId,
@@ -222,16 +334,71 @@ const createDummyPayment = async (req, res) => {
       }
     }, new Date()); // Optionally use the appointment date here
 
-    // console.log("doctor details: , ", appointment.doctor);
     // Update the appointment status
     await Appointment.findByIdAndUpdate(
       appointmentId,
       {
         status: "confirmed",
         payment: payment._id,
-        videoConferenceLink: appointment.appointmentType === 'video'? appointment.doctor.meetingLink: ""
+        videoConferenceLink: appointment.appointmentType === 'video' ? appointment.doctor.meetingLink : ""
       },
       { new: true, runValidators: true }
+    );
+
+    // Queue payment notification after successful payment creation
+    const notificationData = {
+      paymentData: {
+        patientId,
+        doctorId,
+        paymentId: payment._id.toString(),
+        totalAmount: totalAmount,
+        baseAmount: baseAmount,
+        gstAmount: gstAmount
+      },
+      transactionData: {
+        transactionId: razorpay_payment_id,
+        amount: totalAmount
+      },
+      appointmentData: {
+        appointmentId,
+        date: appointment.date,
+        type: appointment.appointmentType
+      }
+    };
+
+    await queuePaymentNotification(
+      notificationData.paymentData,
+      notificationData.transactionData,
+      notificationData.appointmentData
+    );
+
+    // Queue payment notification after successful transaction
+    const appointmentNotificationData = {
+      paymentData: {
+        patientId,
+        doctorId,
+        paymentId: payment._id.toString(),
+        totalAmount: totalAmount,
+        baseAmount: baseAmount,
+        gstAmount: gstAmount
+      },
+      transactionData: {
+        transactionId: razorpay_payment_id,
+        amount: totalAmount
+      },
+      appointmentData: {
+        appointmentId,
+        date: appointment.date,
+        type: appointment.appointmentType,
+        slot: appointment.slot, // Include slot information
+        doctorName: appointment.doctor.fullName // Include doctor name
+      }
+    };
+
+    await queuePaymentNotification(
+      appointmentNotificationData.paymentData,
+      appointmentNotificationData.transactionData,
+      appointmentNotificationData.appointmentData
     );
 
     res.status(200).json({
@@ -296,12 +463,12 @@ const completeAppointment = async (req, res) => {
       if (payment.upcomingEarning && payment.upcomingEarning.status === "pending") {
         const result = await payment.processPayment();
 
-        // Create notification for doctor
-        await Notification.create([{
-          referenceId: appointmentId,
-          user: payment.doctor,
-          message: `₹${result.doctorShare} added to your wallet for completed appointment`,
-          type: "wallet"
+        // Create notification for doctor about wallet credit
+        await WebNotification.create([{
+          userId: payment.doctor.toString(),
+          title: 'Payment Credited to Wallet',
+          message: `₹${result.doctorShare} has been credited to your wallet for the completed appointment.`,
+          type: "success"
         }], { session });
 
         await session.commitTransaction();
@@ -621,7 +788,7 @@ const getDoctorWalletStats = async (req, res) => {
   }
 };
 
-// Process a refund for a payment
+// Refund Payment - Updated with Notification
 const refundPayment = async (req, res) => {
   const { paymentId } = req.params;
   const { reason } = req.body;
@@ -713,23 +880,23 @@ const refundPayment = async (req, res) => {
 
     await transaction.save({ session });
 
-    // // Create notifications
-    // const notificationDocs = [
-    //   new Notification({
-    //     referenceId: payment.appointment._id,
-    //     user: payment.patient,
-    //     message: `Appointment cancelled and refund of ₹${payment.totalamount} initiated`,
-    //     type: "refund"
-    //   }),
-    //   new Notification({
-    //     referenceId: payment.appointment._id,
-    //     user: payment.doctor,
-    //     message: "Appointment has been cancelled",
-    //     type: "appointment"
-    //   })
-    // ];
+    // Create refund notifications
+    const refundNotifications = [
+      {
+        userId: payment.patient.toString(),
+        title: 'Refund Processed',
+        message: `Refund of ₹${payment.totalamount} has been processed for your cancelled appointment.`,
+        type: "success"
+      },
+      {
+        userId: payment.doctor.toString(),
+        title: 'Appointment Cancelled',
+        message: `Appointment has been cancelled and payment of ₹${payment.totalamount} refunded to patient.`,
+        type: "info"
+      }
+    ];
 
-    // await Notification.insertMany(notificationDocs, { session });
+    await WebNotification.insertMany(refundNotifications, { session });
 
     await session.commitTransaction();
     session.endSession();
@@ -750,6 +917,7 @@ const refundPayment = async (req, res) => {
     });
   }
 };
+
 
 
 /**

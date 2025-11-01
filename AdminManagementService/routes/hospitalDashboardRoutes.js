@@ -10,7 +10,8 @@ const {
   getHospitalGrowth,
   getHospitalRevenue,
   getMyVerifiedHospitals,
-  getMyVerifiedDoctors
+  getMyVerifiedDoctors,
+  getAllHospitalsNamesByAdminCluster
 } = require('../controllers/hospitalDashboardController');
 
 // Middleware imports (adjust paths as needed)
@@ -23,6 +24,8 @@ router.get('/analytics/hospitals/revenue', protect, authorize('admin', 'superadm
 // Admin-specific routes
 router.get('/my-verified', protect, authorize('admin', 'superadmin'), getMyVerifiedHospitals);
 router.get('/my-verified-doctors', protect, authorize('admin', 'superadmin'), getMyVerifiedDoctors);
+
+router.get('/hospital/names', protect, authorize('admin', 'superadmin'), getAllHospitalsNamesByAdminCluster);
 
 // Main hospital routes
 router.route('/')

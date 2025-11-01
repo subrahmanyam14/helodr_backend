@@ -7,6 +7,7 @@ const adminDashboardRoutes = require('./routes/adminDashboardRoutes');
 const hospitalDashboardRoutes = require('./routes/hospitalDashboardRoutes');
 const doctorDashboardRoutes = require('./routes/doctorDashoardRoutes');
 const patientDashboardRoutes = require('./routes/patientDashboardRoutes');
+const listingRoutes = require('./routes/listingRoutes');
 dotenv.config();
 const port = process.env.PORT || 3000;  
 const app = express();
@@ -28,6 +29,7 @@ app.use('/admin-dashboard', adminDashboardRoutes);
 app.use('/hospital-dashboard', hospitalDashboardRoutes);
 app.use('/doctor-dashboard', doctorDashboardRoutes);
 app.use('/patient-dashboard', patientDashboardRoutes); 
+app.use('/listings', listingRoutes);
 
 
 app.listen(port, async () => {

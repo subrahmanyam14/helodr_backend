@@ -7,7 +7,8 @@ const {
   updateDoctor,
   verifyDoctor,
   deleteDoctor,
-  getDoctorStats
+  getDoctorStats,
+  getAllDoctorsForadmin
 } = require('../controllers/doctorController');
 
 // Middleware (adjust paths as per your project structure)
@@ -18,6 +19,9 @@ router.use(protect);
 
 // Analytics routes
 router.get('/analytics/stats', authorize('admin'), getDoctorStats);
+
+
+router.get('/admin/doctors', authorize('admin'), getAllDoctorsForadmin);
 
 // CRUD routes
 router.route('/')

@@ -1,5 +1,10 @@
 // UpcomingEarnings.js
+const Doctor = require("./Doctor");
 const mongoose = require("mongoose");
+const {
+    queueWalletCreditNotification,
+    queueUpcomingEarningCreatedNotification
+} = require('../services/walletCreditNotificationService');
 
 const upcomingEarningsSchema = new mongoose.Schema({
     doctor: {
@@ -39,10 +44,46 @@ const upcomingEarningsSchema = new mongoose.Schema({
 
 // Static method to create upcoming earnings record
 upcomingEarningsSchema.statics.createUpcomingEarning = async function (data, session = null) {
+    const Appointment = mongoose.model("Appointment");
+    const Doctor = mongoose.model("Doctor");
+    const User = mongoose.model("User");
+
     try {
         const options = session ? { session } : {};
         const upcomingEarning = new this(data);
         await upcomingEarning.save(options);
+
+        // Send upcoming earning created notification to doctor
+        try {
+            // Get appointment details for notification
+            const appointment = await Appointment.findById(data.appointment)
+                .populate('patient', 'fullName')
+                .session(session);
+
+            // Get doctor's user ID for notification
+            const doctor = await Doctor.findById(data.doctor)
+                .populate('user')
+                .session(session);
+
+            if (appointment && doctor && doctor.user) {
+                const upcomingEarningData = {
+                    doctorId: data.doctor.toString(),
+                    doctorUserId: doctor.user._id.toString(),
+                    amount: data.amount,
+                    appointmentId: data.appointment.toString(),
+                    patientName: appointment.patient.fullName,
+                    scheduledDate: data.scheduledDate,
+                    createdAt: new Date()
+                };
+
+                // Queue upcoming earning created notification
+                await queueUpcomingEarningCreatedNotification(upcomingEarningData);
+            }
+        } catch (notificationError) {
+            console.warn('Upcoming earning created notification failed:', notificationError);
+            // Don't fail the creation process if notification fails
+        }
+
         return upcomingEarning;
     } catch (error) {
         console.error("Error creating upcoming earning:", error);
@@ -68,6 +109,8 @@ upcomingEarningsSchema.statics.getTotalUpcomingEarnings = async function (doctor
 upcomingEarningsSchema.methods.processEarning = async function (session = null) {
     const options = session ? { session } : {};
     const Wallet = mongoose.model("Wallet");
+    const Appointment = mongoose.model("Appointment");
+    const User = mongoose.model("User");
 
     try {
         // Find the doctor's wallet
@@ -82,6 +125,9 @@ upcomingEarningsSchema.methods.processEarning = async function (session = null) 
             });
         }
 
+        // Store current balance for notification
+        const oldBalance = wallet.current_balance;
+
         // Add the pending amount to the wallet
         await wallet.addFunds(
             this.amount,
@@ -94,6 +140,41 @@ upcomingEarningsSchema.methods.processEarning = async function (session = null) 
         // Update status to credited
         this.status = "credited";
         await this.save(options);
+
+        // Send wallet credit notification to doctor
+        try {
+            // Get appointment details for notification
+            const appointment = await Appointment.findById(this.appointment)
+                .populate('patient', 'fullName')
+                .session(session);
+
+            // Get doctor's user ID for notification
+            const doctor = await Doctor.findById(this.doctor)
+                .populate('user')
+                .session(session);
+
+            if (appointment && doctor && doctor.user) {
+                const walletData = {
+                    doctorId: this.doctor.toString(),
+                    doctorUserId: doctor.user._id.toString(),
+                    currentBalance: wallet.current_balance,
+                    previousBalance: oldBalance
+                };
+
+                const earningData = {
+                    amount: this.amount,
+                    appointmentId: this.appointment.toString(),
+                    patientName: appointment.patient.fullName,
+                    creditedAt: new Date()
+                };
+
+                // Queue wallet credit notification
+                await queueWalletCreditNotification(walletData, earningData);
+            }
+        } catch (notificationError) {
+            console.warn('Wallet credit notification failed:', notificationError);
+            // Don't fail the earning process if notification fails
+        }
 
         return {
             success: true,

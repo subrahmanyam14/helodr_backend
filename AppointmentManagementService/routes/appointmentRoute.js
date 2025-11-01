@@ -12,6 +12,8 @@ appointmentRouter.get('/', protect, appointmentController.getAppointments);
 // Get single appointment by ID
 appointmentRouter.get('/:id', protect, appointmentController.getAppointment);
 
+appointmentRouter.get('/single-appointment/:id', protect, appointmentController.getAppointmentForPatient);
+
 // Update appointment status
 appointmentRouter.put('/:id/status', protect, appointmentController.updateAppointmentStatus);
 

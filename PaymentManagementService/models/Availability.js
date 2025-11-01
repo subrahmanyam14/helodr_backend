@@ -49,16 +49,6 @@ const availabilitySchema = new mongoose.Schema({
           type: String,
           enum: ["clinic", "video"],
           required: true
-        },
-        fee: {
-          type: Number,
-          required: true,
-          min: 0
-        },
-        maxPatients: {
-          type: Number,
-          min: 1,
-          default: 1
         }
       }]
     }]
@@ -79,12 +69,7 @@ const availabilitySchema = new mongoose.Schema({
         type: {
           type: String,
           enum: ["clinic", "video"]
-        },
-        fee: {
-          type: Number,
-          min: 0
-        },
-        maxPatients: Number
+        }
       }]
     }],
     reason: String
@@ -237,8 +222,8 @@ availabilitySchema.methods.getAvailableSlotsForDate = function(date) {
   const dayOfWeek = getDayName(targetDate);
   
   const availableSlots = {
-    clinic: { slots: [], fee: null },
-    video: { slots: [], fee: null }
+    clinic: { slots: [] },
+    video: { slots: [] }
   };
   
   const override = this.findOverrideForDate(targetDate);
@@ -251,11 +236,6 @@ availabilitySchema.methods.getAvailableSlotsForDate = function(date) {
       
       shift.consultationTypes?.forEach(consType => {
         const type = consType.type;
-        const fee = consType.fee;
-        
-        if (!availableSlots[type].fee || fee < availableSlots[type].fee) {
-          availableSlots[type].fee = fee;
-        }
         
         timeSlots.forEach(slotTime => {
           const isBooked = this.bookedSlots.some(slot => 
@@ -280,11 +260,6 @@ availabilitySchema.methods.getAvailableSlotsForDate = function(date) {
       
       shift.consultationTypes?.forEach(consType => {
         const type = consType.type;
-        const fee = consType.fee;
-        
-        if (!availableSlots[type].fee || fee < availableSlots[type].fee) {
-          availableSlots[type].fee = fee;
-        }
         
         timeSlots.forEach(slotTime => {
           const isBooked = this.bookedSlots.some(slot => 

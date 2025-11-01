@@ -16,10 +16,10 @@ const Cluster = require('../models/Cluster');
  */
 exports.getAllDoctors = async (req, res) => {
   try {
-    const { 
-      search, 
-      hospital, 
-      specialty, 
+    const {
+      search,
+      hospital,
+      specialty,
       status,
       isActive,
       page = 1,
@@ -50,10 +50,10 @@ exports.getAllDoctors = async (req, res) => {
     });
 
     const verifiedHospitalIds = verifiedHospitals.map(h => h._id);
-    
+
     // Combine hospital IDs (cluster + verified)
     const allHospitalIds = [...new Set([
-      ...hospitalIds.map(id => id.toString()), 
+      ...hospitalIds.map(id => id.toString()),
       ...verifiedHospitalIds.map(id => id.toString())
     ])];
 
@@ -93,10 +93,10 @@ exports.getAllDoctors = async (req, res) => {
 
     // Apply search filter after query if needed (since search might involve multiple fields)
     let filteredDoctors = doctors;
-    
+
     if (search) {
       const searchLower = search.toLowerCase();
-      filteredDoctors = doctors.filter(doctor => 
+      filteredDoctors = doctors.filter(doctor =>
         doctor.fullName?.toLowerCase().includes(searchLower) ||
         doctor.user?.fullName?.toLowerCase().includes(searchLower) ||
         doctor.specializations?.some(s => s?.toLowerCase().includes(searchLower)) ||
@@ -110,15 +110,15 @@ exports.getAllDoctors = async (req, res) => {
         const doctorObj = doctor.toObject();
 
         // Get appointments for this doctor
-        const appointments = await Appointment.find({ 
-          doctor: doctor._id 
+        const appointments = await Appointment.find({
+          doctor: doctor._id
         });
 
         const totalAppointments = appointments.length;
 
         // Calculate appointment breakdown
         const completed = appointments.filter(a => a.status === 'completed').length;
-        const upcoming = appointments.filter(a => 
+        const upcoming = appointments.filter(a =>
           a.status === 'pending' || a.status === 'confirmed'
         ).length;
         const cancelled = appointments.filter(a => a.status === 'cancelled').length;
@@ -129,7 +129,7 @@ exports.getAllDoctors = async (req, res) => {
         let totalRevenue = 0;
 
         for (const apt of completedAppointments) {
-          const payment = await Payment.findOne({ 
+          const payment = await Payment.findOne({
             appointment: apt._id,
             status: 'captured'
           });
@@ -155,7 +155,7 @@ exports.getAllDoctors = async (req, res) => {
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             return appointmentDate >= thirtyDaysAgo;
           });
-          
+
           if (recentAppointments.length === 0 && totalAppointments > 0) {
             doctorStatus = 'on leave';
           }
@@ -198,7 +198,7 @@ exports.getAllDoctors = async (req, res) => {
 
     // Apply hospital name and status filters after enrichment
     let finalDoctors = enrichedDoctors;
-    
+
     if (hospital && hospital !== 'All') {
       finalDoctors = enrichedDoctors.filter(d => d.hospital === hospital);
     }
@@ -290,7 +290,7 @@ exports.getDoctorById = async (req, res) => {
       .map(aff => aff.hospital?._id?.toString())
       .filter(id => id);
 
-    const hasAccess = doctorHospitalIds.some(hospitalId => 
+    const hasAccess = doctorHospitalIds.some(hospitalId =>
       allHospitalIds.includes(hospitalId)
     );
 
@@ -319,7 +319,7 @@ exports.getDoctorById = async (req, res) => {
     const allAppointments = await Appointment.find({ doctor: doctor._id }).lean();
     const completed = allAppointments.filter(a => a.status === 'completed').length;
     const confirmed = allAppointments.filter(a => a.status === 'confirmed').length;
-    const upcoming = allAppointments.filter(a => 
+    const upcoming = allAppointments.filter(a =>
       a.status === 'pending' || a.status === 'confirmed'
     ).length;
     const cancelled = allAppointments.filter(a => a.status === 'cancelled').length;
@@ -329,7 +329,7 @@ exports.getDoctorById = async (req, res) => {
     const completedAppointments = allAppointments.filter(a => a.status === 'completed');
     let totalRevenue = 0;
     for (const apt of completedAppointments) {
-      const payment = await Payment.findOne({ 
+      const payment = await Payment.findOne({
         appointment: apt._id,
         status: 'captured'
       });
@@ -342,25 +342,25 @@ exports.getDoctorById = async (req, res) => {
     const monthlyAppointments = [];
     const monthlyRevenue = [];
     const now = new Date();
-    
+
     for (let i = 5; i >= 0; i--) {
       const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const nextMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       const monthName = monthDate.toLocaleString('en-US', { month: 'short' });
-      
+
       const monthAppts = allAppointments.filter(a => {
         const apptDate = new Date(a.date);
         return apptDate >= monthDate && apptDate < nextMonth;
       });
-      
+
       monthlyAppointments.push({
         month: monthName,
         count: monthAppts.length
       });
-      
+
       let monthRevenue = 0;
       for (const apt of monthAppts.filter(a => a.status === 'completed')) {
-        const payment = await Payment.findOne({ 
+        const payment = await Payment.findOne({
           appointment: apt._id,
           status: 'captured'
         });
@@ -368,7 +368,7 @@ exports.getDoctorById = async (req, res) => {
           monthRevenue += payment.amount || 0;
         }
       }
-      
+
       monthlyRevenue.push({
         month: monthName,
         amount: monthRevenue
@@ -381,8 +381,8 @@ exports.getDoctorById = async (req, res) => {
     // Calculate patient satisfaction (based on ratings >= 4)
     const ratedAppointments = allAppointments.filter(a => a.review && a.review.rating);
     const satisfiedCount = ratedAppointments.filter(a => a.review.rating >= 4).length;
-    const patientSatisfaction = ratedAppointments.length > 0 
-      ? Math.round((satisfiedCount / ratedAppointments.length) * 100) 
+    const patientSatisfaction = ratedAppointments.length > 0
+      ? Math.round((satisfiedCount / ratedAppointments.length) * 100)
       : 0;
 
     // Format current affiliation
@@ -451,10 +451,10 @@ exports.getDoctorById = async (req, res) => {
       specializations: doctorObj.specializations?.[0] || doctorObj.specialization || 'General Medicine',
       registrationNumber: doctorObj.registrationNumber || '-',
       experience: doctorObj.experience || 0,
-      
+
       // Hospital affiliations
       hospitalAffiliations: formattedAffiliations,
-      
+
       // Address
       address: {
         city: doctorObj.address?.city || '-',
@@ -462,19 +462,19 @@ exports.getDoctorById = async (req, res) => {
         country: doctorObj.address?.country || 'India',
         pincode: doctorObj.address?.pincode || doctorObj.address?.zipCode || '-'
       },
-      
+
       // Contact
       contact: {
         phone: doctorObj.user?.phoneNumber || doctorObj.phoneNumber || '-',
         email: doctorObj.user?.email || doctorObj.email || '-'
       },
-      
+
       // User details
       user: {
         dateOfBirth: doctorObj.user?.dateOfBirth || null,
         gender: doctorObj.user?.gender || doctorObj.gender || null
       },
-      
+
       // Statistics
       stats: {
         totalAppointments: totalAppointments,
@@ -492,7 +492,7 @@ exports.getDoctorById = async (req, res) => {
           upcoming: upcoming
         }
       },
-      
+
       // Verification details
       verification: {
         personalVerified: doctorObj.verification?.personalVerified || false,
@@ -503,25 +503,25 @@ exports.getDoctorById = async (req, res) => {
         lastReviewedAt: doctorObj.verification?.lastReviewedAt || null,
         rejectionReason: doctorObj.verification?.rejectionReason || ''
       },
-      
+
       // Documents
       documents: documents,
-      
+
       // Assignments
       assignments: {
         scheduler: doctorObj.assignments?.scheduler || null,
         reviewer: doctorObj.assignments?.reviewer || null,
         relationshipManager: doctorObj.assignments?.relationshipManager || null
       },
-      
+
       // Image
-      imageUrl: doctorObj.user?.profilePicture || doctorObj.profilePicture || 
-                `https://ui-avatars.com/api/?name=${encodeURIComponent(doctorObj.fullName || 'Doctor')}&background=00B5A3&color=fff`,
-      
+      imageUrl: doctorObj.user?.profilePicture || doctorObj.profilePicture ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(doctorObj.fullName || 'Doctor')}&background=00B5A3&color=fff`,
+
       // Status
       status: doctorObj.isActive ? 'active' : (doctorObj.status || 'pending'),
       isActive: doctorObj.isActive,
-      
+
       // Audit trail
       audit: {
         createdAt: doctorObj.createdAt,
@@ -529,7 +529,7 @@ exports.getDoctorById = async (req, res) => {
         createdBy: doctorObj.createdBy || 'system',
         updatedBy: doctorObj.updatedBy || 'system'
       },
-      
+
       // Additional fields
       qualifications: doctorObj.qualifications || [],
       languages: doctorObj.languages || [],
@@ -623,10 +623,10 @@ exports.createDoctor = async (req, res) => {
     // Find hospital if hospital type
     let hospitalAffiliations = [];
     if (clinicType === 'hospital' && hospitalName) {
-      const hospital = await Hospital.findOne({ 
-        name: new RegExp(hospitalName, 'i') 
+      const hospital = await Hospital.findOne({
+        name: new RegExp(hospitalName, 'i')
       });
-      
+
       if (hospital) {
         hospitalAffiliations.push({
           hospital: hospital._id,
@@ -676,7 +676,7 @@ exports.createDoctor = async (req, res) => {
 
   } catch (error) {
     console.error('Create doctor error:', error);
-    
+
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -746,7 +746,7 @@ exports.updateDoctor = async (req, res) => {
       .map(aff => aff.hospital?.toString())
       .filter(id => id);
 
-    const hasAccess = doctorHospitalIds.some(hospitalId => 
+    const hasAccess = doctorHospitalIds.some(hospitalId =>
       allHospitalIds.includes(hospitalId)
     );
 
@@ -786,7 +786,7 @@ exports.updateDoctor = async (req, res) => {
 
   } catch (error) {
     console.error('Update doctor error:', error);
-    
+
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -849,7 +849,7 @@ exports.verifyDoctor = async (req, res) => {
       .map(aff => aff.hospital?.toString())
       .filter(id => id);
 
-    const hasAccess = doctorHospitalIds.some(hospitalId => 
+    const hasAccess = doctorHospitalIds.some(hospitalId =>
       allHospitalIds.includes(hospitalId)
     );
 
@@ -950,7 +950,7 @@ exports.deleteDoctor = async (req, res) => {
       .map(aff => aff.hospital?.toString())
       .filter(id => id);
 
-    const hasAccess = doctorHospitalIds.some(hospitalId => 
+    const hasAccess = doctorHospitalIds.some(hospitalId =>
       allHospitalIds.includes(hospitalId)
     );
 
@@ -1087,7 +1087,7 @@ exports.getDoctorStats = async (req, res) => {
         }
         else if (apt.status === 'cancelled') {
           cancelledAppointments++;
-          
+
           // Add cancellation refund data if available
           if (apt.cancellation && apt.cancellation.refundAmount) {
             refundAmount += apt.cancellation.refundAmount;
@@ -1124,6 +1124,190 @@ exports.getDoctorStats = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching doctor statistics',
+      error: error.message
+    });
+  }
+};
+
+
+exports.getAllDoctorsForadmin = async (req, res) => {
+  try {
+    const { 
+      search, 
+      hospital, 
+      specialty, 
+      status,
+      isActive,
+      page = 1,
+      limit = 10,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    const adminId = req.user._id;
+
+    // Step 1: Find cluster managed by this admin
+    const cluster = await Cluster.findOne({ user: adminId }).populate('hospitals');
+
+    if (!cluster) {
+      return res.status(404).json({
+        success: false,
+        message: 'No cluster found for this admin'
+      });
+    }
+
+    // Step 2: Get hospital IDs from the cluster
+    const hospitalIds = cluster.hospitals.map(h => h._id);
+
+    // Step 3: Also get doctors from hospitals verified by this admin
+    const verifiedHospitals = await Hospital.find({
+      'verification.verifiedBy': adminId,
+      'verification.status': 'verified'
+    });
+
+    const verifiedHospitalIds = verifiedHospitals.map(h => h._id);
+    
+    // Combine hospital IDs (cluster + verified)
+    const allHospitalIds = [...new Set([
+      ...hospitalIds.map(id => id.toString()), 
+      ...verifiedHospitalIds.map(id => id.toString())
+    ])];
+
+    // Build base query for doctors
+    let doctorQuery = {
+      'hospitalAffiliations.hospital': { $in: allHospitalIds }
+    };
+
+    // Apply filters to the database query for better performance
+    if (specialty && specialty !== 'All') {
+      doctorQuery.specializations = specialty;
+    }
+
+    if (isActive !== undefined) {
+      doctorQuery.isActive = isActive === 'true';
+    }
+
+    // Calculate pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Sort configuration
+    const sortConfig = {};
+    sortConfig[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+    // Get total count for pagination info
+    const totalDoctors = await Doctor.countDocuments(doctorQuery);
+
+    // Get paginated doctors with only essential fields populated
+    const doctors = await Doctor.find(doctorQuery)
+      .populate('user', 'fullName email phoneNumber profilePicture')
+      .populate('hospitalAffiliations.hospital', 'name') // Only populate name field for hospital
+      .select('_id fullName hospitalAffiliations user') // Removed unnecessary fields
+      .sort(sortConfig)
+      .skip(skip)
+      .limit(limitNum);
+
+    // Apply search filter after query if needed (since search might involve multiple fields)
+    let filteredDoctors = doctors;
+    
+    if (search) {
+      const searchLower = search.toLowerCase();
+      filteredDoctors = doctors.filter(doctor => 
+        doctor.fullName?.toLowerCase().includes(searchLower) ||
+        doctor.user?.fullName?.toLowerCase().includes(searchLower) ||
+        doctor.specializations?.some(s => s?.toLowerCase().includes(searchLower)) ||
+        doctor.registrationNumber?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Simplified enrichment focusing on name, _id, and hospital details
+    const enrichedDoctors = filteredDoctors.map((doctor) => {
+      const doctorObj = doctor.toObject();
+
+      // Determine primary hospital details
+      const currentAffiliation = doctorObj.hospitalAffiliations?.find(
+        aff => aff.currentlyWorking
+      );
+      
+      const hospitalDetails = currentAffiliation?.hospital ? {
+        _id: currentAffiliation.hospital._id,
+        name: currentAffiliation.hospital.name
+      } : null;
+
+      // Get all hospital affiliations with only ID and name
+      const allHospitalDetails = doctorObj.hospitalAffiliations?.map(aff => ({
+        _id: aff.hospital?._id,
+        name: aff.hospital?.name,
+        currentlyWorking: aff.currentlyWorking,
+        joiningDate: aff.joiningDate,
+        leavingDate: aff.leavingDate
+      })) || [];
+
+      return {
+        _id: doctorObj._id,
+        name: doctorObj.fullName || doctorObj.user?.fullName || 'N/A',
+        // Include user details if needed
+        user: doctorObj.user ? {
+          _id: doctorObj.user._id,
+          fullName: doctorObj.user.fullName,
+          email: doctorObj.user.email,
+          phoneNumber: doctorObj.user.phoneNumber,
+          profilePicture: doctorObj.user.profilePicture
+        } : null,
+        // Primary hospital (currently working)
+        primaryHospital: hospitalDetails,
+        // All hospital affiliations with only ID and name
+        hospitalAffiliations: allHospitalDetails
+        // Removed unnecessary fields: specializations, registrationNumber, isActive, experience, averageRating, totalRatings
+      };
+    });
+
+    // Apply hospital name and status filters after enrichment
+    let finalDoctors = enrichedDoctors;
+    
+    if (hospital && hospital !== 'All') {
+      finalDoctors = enrichedDoctors.filter(d => 
+        d.primaryHospital?.name === hospital || 
+        d.hospitalAffiliations.some(aff => aff.name === hospital)
+      );
+    }
+
+    if (status && status !== 'All') {
+      finalDoctors = finalDoctors.filter(d => {
+        if (status === 'active') return d.isActive;
+        if (status === 'inactive') return !d.isActive;
+        return true;
+      });
+    }
+
+    // Calculate final pagination info
+    const finalCount = finalDoctors.length;
+    const totalPages = Math.ceil(totalDoctors / limitNum);
+    const currentPage = pageNum;
+    const hasNextPage = currentPage < totalPages;
+    const hasPrevPage = currentPage > 1;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        doctors: finalDoctors,
+        pagination: {
+          totalDoctors: totalDoctors,
+          currentPage,
+          totalPages,
+          hasNextPage,
+          hasPrevPage,
+          limit: limitNum
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get all doctors error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching doctors',
       error: error.message
     });
   }

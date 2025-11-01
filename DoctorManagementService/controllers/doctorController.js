@@ -665,224 +665,224 @@ const DoctorController = {
     }
   },
 
-// Register a new hospital
-registerHospital: async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  // Register a new hospital
+  registerHospital: async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-  try {
-    const {
-      name,
-      type,
-      about,
-      specialties,
-      facilities,
-      address,
-      contact,
-      services,
-      featuredImage,
-      photos
-    } = req.body;
+    try {
+      const {
+        name,
+        type,
+        about,
+        specialties,
+        facilities,
+        address,
+        contact,
+        services,
+        featuredImage,
+        photos
+      } = req.body;
 
-    // Validate coordinates if provided
-    if (address.coordinates && (!Array.isArray(address.coordinates) || address.coordinates.length !== 2)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'Valid coordinates array [longitude, latitude] is required'
-      });
-    }
+      // Validate coordinates if provided
+      if (address.coordinates && (!Array.isArray(address.coordinates) || address.coordinates.length !== 2)) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: 'Valid coordinates array [longitude, latitude] is required'
+        });
+      }
 
-    // Check if hospital already exists with this name and address
-    const existingHospital = await Hospital.findOne({
-      name,
-      'address.city': address.city,
-      'address.street': address.street
-    }).session(session);
-
-    if (existingHospital) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'Hospital already exists with this name and address',
-        hospital: existingHospital
-      });
-    }
-
-    // Check if hospitalAdmin already exists for this user
-    const existingHospitalAdmin = await Hospital.findOne({ addedBy: req.user.id }).session(session);
-    if (existingHospitalAdmin) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'Hospital profile already exists for this user',
-        data: existingHospitalAdmin
-      });
-    }
-
-    const existingUser = await User.findById(req.user.id).session(session);
-    if (!existingUser) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'User profile does not exist for this Hospital.'
-      });
-    }
-
-    // Create new hospital
-    const newHospital = new Hospital({
-      name,
-      type: type || 'private',
-      about: about || '',
-      specialties: specialties || [],
-      facilities: facilities || [],
-      address: {
-        street: address.street,
-        city: address.city,
-        state: address.state,
-        country: address.country || 'India',
-        pinCode: address.pinCode,
-        coordinates: address.coordinates || undefined
-      },
-      contact: {
-        phone: contact.phone,
-        email: contact.email,
-        website: contact.website
-      },
-      services: {
-        emergency: services?.emergency || false,
-        ambulance: services?.ambulance || false,
-        insuranceSupport: services?.insuranceSupport || false
-      },
-      verification: {
-        status: 'pending',
-        verifiedAt: null
-      },
-      featuredImage: featuredImage || "",
-      photos: photos || [],
-      addedBy: req.user.id,
-      clusters: [] // Initialize empty clusters array
-    });
-
-    await newHospital.save({ session });
-
-    // CLUSTER ASSIGNMENT LOGIC
-    let assignedClusters = [];
-
-    // Only assign to clusters if coordinates are provided
-    if (address.coordinates && address.coordinates.length === 2) {
-      // 1. Find clusters that contain this hospital's location within their radius
-      const containingClusters = await Cluster.find({
-        location: {
-          $near: {
-            $geometry: {
-              type: "Point",
-              coordinates: newHospital.address.coordinates
-            },
-            $maxDistance: 100000 // Search within 100km radius for hospitals
-          }
-        },
-        isActive: true
+      // Check if hospital already exists with this name and address
+      const existingHospital = await Hospital.findOne({
+        name,
+        'address.city': address.city,
+        'address.street': address.street
       }).session(session);
 
-      // 2. Check which clusters actually contain the hospital (within their radius)
-      for (const cluster of containingClusters) {
-        const distance = calculateDistance(
-          newHospital.address.coordinates,
-          cluster.location.coordinates
-        );
-
-        if (distance <= cluster.radius) {
-          // Check if hospital limit is not exceeded
-          if (cluster.hospitals.length < 50) {
-            assignedClusters.push(cluster);
-          }
-        }
+      if (existingHospital) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: 'Hospital already exists with this name and address',
+          hospital: existingHospital
+        });
       }
 
-      // 3. If not in any cluster, find nearest active cluster within reasonable distance
-      if (assignedClusters.length === 0) {
-        const nearestCluster = await Cluster.findOne({
+      // Check if hospitalAdmin already exists for this user
+      const existingHospitalAdmin = await Hospital.findOne({ addedBy: req.user.id }).session(session);
+      if (existingHospitalAdmin) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: 'Hospital profile already exists for this user',
+          data: existingHospitalAdmin
+        });
+      }
+
+      const existingUser = await User.findById(req.user.id).session(session);
+      if (!existingUser) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: 'User profile does not exist for this Hospital.'
+        });
+      }
+
+      // Create new hospital
+      const newHospital = new Hospital({
+        name,
+        type: type || 'private',
+        about: about || '',
+        specialties: specialties || [],
+        facilities: facilities || [],
+        address: {
+          street: address.street,
+          city: address.city,
+          state: address.state,
+          country: address.country || 'India',
+          pinCode: address.pinCode,
+          coordinates: address.coordinates || undefined
+        },
+        contact: {
+          phone: contact.phone,
+          email: contact.email,
+          website: contact.website
+        },
+        services: {
+          emergency: services?.emergency || false,
+          ambulance: services?.ambulance || false,
+          insuranceSupport: services?.insuranceSupport || false
+        },
+        verification: {
+          status: 'pending',
+          verifiedAt: null
+        },
+        featuredImage: featuredImage || "",
+        photos: photos || [],
+        addedBy: req.user.id,
+        clusters: [] // Initialize empty clusters array
+      });
+
+      await newHospital.save({ session });
+
+      // CLUSTER ASSIGNMENT LOGIC
+      let assignedClusters = [];
+
+      // Only assign to clusters if coordinates are provided
+      if (address.coordinates && address.coordinates.length === 2) {
+        // 1. Find clusters that contain this hospital's location within their radius
+        const containingClusters = await Cluster.find({
+          location: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: newHospital.address.coordinates
+              },
+              $maxDistance: 100000 // Search within 100km radius for hospitals
+            }
+          },
           isActive: true
-        })
-          .sort({
-            location: {
-              $near: {
-                $geometry: {
-                  type: "Point",
-                  coordinates: newHospital.address.coordinates
+        }).session(session);
+
+        // 2. Check which clusters actually contain the hospital (within their radius)
+        for (const cluster of containingClusters) {
+          const distance = calculateDistance(
+            newHospital.address.coordinates,
+            cluster.location.coordinates
+          );
+
+          if (distance <= cluster.radius) {
+            // Check if hospital limit is not exceeded
+            if (cluster.hospitals.length < 50) {
+              assignedClusters.push(cluster);
+            }
+          }
+        }
+
+        // 3. If not in any cluster, find nearest active cluster within reasonable distance
+        if (assignedClusters.length === 0) {
+          const nearestCluster = await Cluster.findOne({
+            isActive: true
+          })
+            .sort({
+              location: {
+                $near: {
+                  $geometry: {
+                    type: "Point",
+                    coordinates: newHospital.address.coordinates
+                  }
                 }
               }
-            }
-          })
-          .session(session);
+            })
+            .session(session);
 
-        if (nearestCluster) {
-          const distanceToNearest = calculateDistance(
-            newHospital.address.coordinates,
-            nearestCluster.location.coordinates
-          );
-          
-          // Only assign if within 200km of nearest cluster
-          if (distanceToNearest <= 200000 && nearestCluster.hospitals.length < 50) {
-            assignedClusters.push(nearestCluster);
+          if (nearestCluster) {
+            const distanceToNearest = calculateDistance(
+              newHospital.address.coordinates,
+              nearestCluster.location.coordinates
+            );
+
+            // Only assign if within 200km of nearest cluster
+            if (distanceToNearest <= 200000 && nearestCluster.hospitals.length < 50) {
+              assignedClusters.push(nearestCluster);
+            }
           }
         }
-      }
 
-      // 4. Add hospital to the assigned clusters
-      for (const cluster of assignedClusters) {
-        // Check if hospital already exists in cluster to prevent duplicates
-        if (!cluster.hospitals.includes(newHospital._id)) {
-          cluster.hospitals.push(newHospital._id);
-          await cluster.save({ session });
+        // 4. Add hospital to the assigned clusters
+        for (const cluster of assignedClusters) {
+          // Check if hospital already exists in cluster to prevent duplicates
+          if (!cluster.hospitals.includes(newHospital._id)) {
+            cluster.hospitals.push(newHospital._id);
+            await cluster.save({ session });
 
-          // Add cluster to hospital's clusters array
-          newHospital.clusters.push(cluster._id);
+            // Add cluster to hospital's clusters array
+            newHospital.clusters.push(cluster._id);
+          }
+        }
+
+        // Save hospital with updated clusters
+        if (assignedClusters.length > 0) {
+          await newHospital.save({ session });
         }
       }
 
-      // Save hospital with updated clusters
-      if (assignedClusters.length > 0) {
-        await newHospital.save({ session });
-      }
+      // Update user with hospital reference
+      existingUser.hospitalId = newHospital._id;
+      await existingUser.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      // Populate cluster details for response
+      const populatedHospital = await Hospital.findById(newHospital._id)
+        .populate('clusters', 'clusterName location radius');
+
+      res.status(201).json({
+        success: true,
+        message: `Hospital registered successfully${assignedClusters.length > 0 ? ` and assigned to ${assignedClusters.length} cluster(s)` : ''}`,
+        hospital: populatedHospital,
+        clusterAssignment: {
+          assignedCount: assignedClusters.length,
+          clusterNames: assignedClusters.map(cluster => cluster.clusterName)
+        }
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.log("Error in registerHospital: ", error);
+      res.status(500).json({
+        success: false,
+        message: 'Error registering hospital',
+        error: error.message
+      });
     }
-
-    // Update user with hospital reference
-    existingUser.hospitalId = newHospital._id;
-    await existingUser.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    // Populate cluster details for response
-    const populatedHospital = await Hospital.findById(newHospital._id)
-      .populate('clusters', 'clusterName location radius');
-
-    res.status(201).json({
-      success: true,
-      message: `Hospital registered successfully${assignedClusters.length > 0 ? ` and assigned to ${assignedClusters.length} cluster(s)` : ''}`,
-      hospital: populatedHospital,
-      clusterAssignment: {
-        assignedCount: assignedClusters.length,
-        clusterNames: assignedClusters.map(cluster => cluster.clusterName)
-      }
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.log("Error in registerHospital: ", error);
-    res.status(500).json({
-      success: false,
-      message: 'Error registering hospital',
-      error: error.message
-    });
-  }
-},
+  },
 
 
   // Add bank details for a doctor
@@ -1615,6 +1615,7 @@ registerHospital: async (req, res) => {
         specialization,
         isVerified,
         isActive,
+        currentlyWorking,
         page = 1,
         limit = 10
       } = req.query;
@@ -1630,39 +1631,117 @@ registerHospital: async (req, res) => {
       const pageNum = Math.max(1, parseInt(page));
       const limitNum = Math.min(Math.max(1, parseInt(limit)), 100);
 
-      // Build query
+      // First, get hospital details once
+      const hospital = await Hospital.findById(hospitalId)
+        .select('name type address contact services statistics photos featuredImage specialties facilities about')
+        .lean();
+
+      if (!hospital) {
+        return res.status(404).json({
+          success: false,
+          message: 'Hospital not found'
+        });
+      }
+
+      // Build query for doctors - correct way to query array of objects
       const query = {
         'hospitalAffiliations.hospital': hospitalId
       };
 
       if (specialization) {
-        query.specialization = { $regex: sanitizeRegex(specialization), $options: 'i' };
+        query.specializations = { $regex: sanitizeRegex(specialization), $options: 'i' };
       }
 
-      if (isVerified !== undefined) {
-        query['verification.status'] = isVerified === 'true' ? 'verified' : { $ne: 'verified' };
-      }
+      // if (isVerified !== undefined) {
+      //   query['verification.status'] = isVerified === 'true' ? 'verified' : { $ne: 'verified' };
+      // }
 
       if (isActive !== undefined) {
         query.isActive = isActive === 'true';
       }
 
-      // Execute query
+      if (currentlyWorking !== undefined) {
+        query['hospitalAffiliations.currentlyWorking'] = currentlyWorking === 'true';
+      }
+
+      // Execute query with optimized field selection
       const skip = (pageNum - 1) * limitNum;
 
       const doctors = await Doctor.find(query)
-        .populate('user', 'name email profileImage phoneNumber')
-        .populate('hospitalAffiliations.hospital', 'name address')
+        .select('user fullName title specializations registrationNumber qualifications experience languages bio clinicConsultationFee onlineConsultation address review meetingLink hospitalAffiliations isActive')
+        .populate({
+          path: 'user',
+          select: 'name email profilePhoto phoneNumber',
+          // match: { isActive: true }
+        })
         .skip(skip)
         .limit(limitNum)
         .lean();
 
+      // Filter out doctors where user population failed (inactive users)
+      const filteredDoctors = doctors.filter(doctor => doctor.user !== null);
+
       const total = await Doctor.countDocuments(query);
 
-      // Format response
+      // Format response - add hospital affiliation details to each doctor
+      const formattedDoctors = filteredDoctors.map(doctor => {
+        // Find the specific hospital affiliation for this hospital
+        const hospitalAffiliation = doctor.hospitalAffiliations.find(
+          affil => affil.hospital && affil.hospital.toString() === hospitalId
+        );
+
+        // Create a clean doctor object without all hospitalAffiliations
+        const doctorData = {
+          _id: doctor._id,
+          user: doctor.user,
+          fullName: doctor.fullName,
+          title: doctor.title,
+          specializations: doctor.specializations,
+          registrationNumber: doctor.registrationNumber,
+          qualifications: doctor.qualifications,
+          experience: doctor.experience,
+          languages: doctor.languages,
+          bio: doctor.bio,
+          clinicConsultationFee: doctor.clinicConsultationFee,
+          onlineConsultation: doctor.onlineConsultation,
+          address: doctor.address,
+          isActive: doctor.isActive,
+          review: doctor.review,
+          meetingLink: doctor.meetingLink,
+          hospitalAffiliation: hospitalAffiliation ? {
+            department: hospitalAffiliation.department,
+            position: hospitalAffiliation.position,
+            from: hospitalAffiliation.from,
+            to: hospitalAffiliation.to,
+            currentlyWorking: hospitalAffiliation.currentlyWorking
+          } : null
+        };
+
+        return doctorData;
+      });
+
       res.json({
         success: true,
-        data: doctors,
+        data: {
+          hospital: {
+            _id: hospital._id,
+            name: hospital.name,
+            type: hospital.type,
+            address: hospital.address,
+            contact: hospital.contact,
+            services: hospital.services,
+            specialties: hospital.specialties,
+            facilities: hospital.facilities,
+            about: hospital.about,
+            photos: hospital.photos,
+            featuredImage: hospital.featuredImage,
+            statistics: hospital.statistics || {
+              averageRating: 0,
+              totalRatings: 0
+            }
+          },
+          doctors: formattedDoctors
+        },
         pagination: {
           total,
           page: pageNum,
@@ -1680,7 +1759,6 @@ registerHospital: async (req, res) => {
       });
     }
   },
-
   insertDummyData: async (req, res) => {
     try {
       const { user, doctor, hospital } = req.body;

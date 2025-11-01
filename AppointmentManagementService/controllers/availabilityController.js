@@ -598,7 +598,7 @@ exports.createAvailability = async (req, res) => {
       });
     }
 
-    const doctorDetails = await Doctor.findById(req.body.doctor).select("onlineConsultation clinicConsultationFee");
+    const doctorDetails = await Doctor.findById(req.body.doctor);
     
     if (!doctorDetails) {
       return res.status(404).json({
@@ -626,70 +626,33 @@ exports.createAvailability = async (req, res) => {
 
     let hasValidConsultationTypes = false;
     
-    // Process the schedule to add fees automatically
+    // Validate that at least one shift has consultation types
     if (req.body.schedule && Array.isArray(req.body.schedule)) {
       for (const daySchedule of req.body.schedule) {
         if (daySchedule.shifts && Array.isArray(daySchedule.shifts)) {
           for (const shift of daySchedule.shifts) {
             if (shift.consultationTypes && shift.consultationTypes.length > 0) {
               hasValidConsultationTypes = true;
-              
-              // Add fees to consultation types
-              shift.consultationTypes = shift.consultationTypes.map(consultationType => {
-                let fee;
-                
-                if (consultationType.type === 'clinic') {
-                  fee = doctorDetails.clinicConsultationFee?.consultationFee;
-                  if (fee === undefined || fee === null) {
-                    throw new Error('Clinic consultation fee not found for doctor');
-                  }
-                } else if (consultationType.type === 'video') {
-                  fee = doctorDetails.onlineConsultation?.consultationFee;
-                  if (fee === undefined || fee === null) {
-                    throw new Error('Online consultation fee not found for doctor');
-                  }
-                }
-                
-                return {
-                  ...consultationType,
-                  fee: fee
-                };
-              });
+              break;
             }
           }
         }
+        if (hasValidConsultationTypes) break;
       }
     }
 
-    // Also process overrides if they exist
-    if (req.body.overrides && Array.isArray(req.body.overrides)) {
+    // Also check overrides for consultation types
+    if (!hasValidConsultationTypes && req.body.overrides && Array.isArray(req.body.overrides)) {
       for (const override of req.body.overrides) {
         if (override.shifts && Array.isArray(override.shifts)) {
           for (const shift of override.shifts) {
             if (shift.consultationTypes && shift.consultationTypes.length > 0) {
-              shift.consultationTypes = shift.consultationTypes.map(consultationType => {
-                let fee;
-                
-                if (consultationType.type === 'clinic') {
-                  fee = doctorDetails.clinicConsultationFee?.consultationFee;
-                  if (fee === undefined || fee === null) {
-                    throw new Error('Clinic consultation fee not found for doctor');
-                  }
-                } else if (consultationType.type === 'video') {
-                  fee = doctorDetails.onlineConsultation?.consultationFee;
-                  if (fee === undefined || fee === null) {
-                    throw new Error('Online consultation fee not found for doctor');
-                  }
-                }
-                
-                return {
-                  ...consultationType,
-                  fee: fee
-                };
-              });
+              hasValidConsultationTypes = true;
+              break;
             }
           }
         }
+        if (hasValidConsultationTypes) break;
       }
     }
 

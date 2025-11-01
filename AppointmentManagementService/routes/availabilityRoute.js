@@ -18,25 +18,60 @@ availabilityRouter.get('/', protect, authorize('doctor'), availabilityController
 
 // Get doctor's available slots for a specific date (public)
 availabilityRouter.get('/doctor/:doctorId/slots', availabilityController.getDoctorAvailableSlots);
-
 // Create a new availability (doctor or admin only)
 availabilityRouter.post(
   '/',
   [
     protect,
-    authorize('doctor'),
+    authorize('doctor', 'admin'), // Added admin role if needed
     [
-      check('doctor', 'Doctor ID is required').not().isEmpty(),
-      check('slotDuration', 'Slot duration must be at least 5 minutes').isNumeric().toInt().isInt({ min: 5 }),
+      check('doctor', 'Doctor ID is required').isMongoId(), // More specific validation
+      check('slotDuration', 'Slot duration must be at least 5 minutes')
+        .isInt({ min: 5, max: 60 }) // Added max limit for safety
+        .toInt(),
+      check('bufferTime', 'Buffer time must be a non-negative number')
+        .optional()
+        .isInt({ min: 0 })
+        .toInt(),
       check('schedule', 'Schedule is required').isArray({ min: 1 }),
-      check('schedule.*.day', 'Day is required').isIn([
+      check('schedule.*.day', 'Valid day is required').isIn([
         'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
       ]),
-      check('schedule.*.shifts', 'Shifts are required').isArray({ min: 1 }),
-      check('schedule.*.shifts.*.startTime', 'Start time is required').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
-      check('schedule.*.shifts.*.endTime', 'End time is required').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
-      check('schedule.*.shifts.*.consultationTypes', 'At least one consultation type is required').isArray({ min: 1 }),
-      check('schedule.*.shifts.*.consultationTypes.*.type', 'Consultation type must be either clinic or video').isIn(['clinic', 'video'])
+      check('schedule.*.shifts', 'At least one shift is required per day').isArray({ min: 1 }),
+      check('schedule.*.shifts.*.startTime', 'Valid start time (HH:MM) is required')
+        .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
+      check('schedule.*.shifts.*.endTime', 'Valid end time (HH:MM) is required')
+        .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
+      check('schedule.*.shifts.*.consultationTypes', 'At least one consultation type is required')
+        .isArray({ min: 1 }),
+      check('schedule.*.shifts.*.consultationTypes.*.type', 'Consultation type must be clinic or video')
+        .isIn(['clinic', 'video']),
+      
+      // Optional fields validation
+      check('isVirtual', 'isVirtual must be a boolean').optional().isBoolean(),
+      check('recurrence', 'Recurrence must be daily, weekly, custom, or null')
+        .optional()
+        .isIn(['daily', 'weekly', 'custom', null]),
+      check('effectiveFrom', 'Effective from must be a valid date').optional().isISO8601(),
+      check('effectiveTo', 'Effective to must be a valid date').optional().isISO8601(),
+      
+      // Overrides validation (if provided)
+      check('overrides', 'Overrides must be an array').optional().isArray(),
+      check('overrides.*.date', 'Override date is required').optional().isISO8601(),
+      check('overrides.*.isAvailable', 'isAvailable must be a boolean').optional().isBoolean(),
+      check('overrides.*.shifts', 'Override shifts must be an array').optional().isArray(),
+      check('overrides.*.shifts.*.startTime', 'Valid override start time (HH:MM) is required')
+        .optional()
+        .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
+      check('overrides.*.shifts.*.endTime', 'Valid override end time (HH:MM) is required')
+        .optional()
+        .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
+      check('overrides.*.shifts.*.consultationTypes', 'Override consultation types must be an array')
+        .optional()
+        .isArray(),
+      check('overrides.*.shifts.*.consultationTypes.*.type', 'Override consultation type must be clinic or video')
+        .optional()
+        .isIn(['clinic', 'video'])
     ]
   ],
   availabilityController.createAvailability

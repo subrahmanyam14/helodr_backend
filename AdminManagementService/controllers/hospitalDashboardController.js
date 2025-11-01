@@ -856,4 +856,85 @@ exports.getMyVerifiedDoctors = async (req, res) => {
   }
 };
 
+
+exports.getAllHospitalsNamesByAdminCluster = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { 
+      page = 1, 
+      limit = 10, 
+      type, 
+      verificationStatus,
+      search 
+    } = req.query;
+    
+    // Find the cluster assigned to this admin
+    const cluster = await Cluster.findOne({ 
+      user: adminId,
+      isActive: true 
+    });
+    
+    if (!cluster) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active cluster found for this admin'
+      });
+    }
+    
+    // Build query for hospitals in this cluster
+    const query = {
+      _id: { $in: cluster.hospitals }
+    };
+    
+    // Add filters if provided
+    if (type) query.type = type;
+    if (verificationStatus) query['verification.status'] = verificationStatus;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { specialties: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Execute query with pagination and select only required fields
+    const skip = (page - 1) * limit;
+    const hospitals = await Hospital.find(query)
+      .select('_id name addedBy') // Only fetch these fields
+      .limit(parseInt(limit))
+      .skip(skip)
+      .sort({ createdAt: -1 });
+    
+    const totalHospitals = await Hospital.countDocuments(query);
+    
+    // Transform the data to match the desired format
+    const formattedHospitals = hospitals.map(hospital => ({
+      id: hospital._id,
+      name: hospital.name,
+      addedBy: hospital.addedBy
+    }));
+    
+    res.status(200).json({
+      success: true,
+      count: formattedHospitals.length,
+      totalHospitals,
+      totalPages: Math.ceil(totalHospitals / limit),
+      currentPage: parseInt(page),
+      clusterInfo: {
+        id: cluster._id,
+        name: cluster.clusterName,
+        location: cluster.location,
+        radius: cluster.radius
+      },
+      data: formattedHospitals
+    });
+  } catch (error) {
+    console.error('Get hospitals by admin cluster error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching hospitals',
+      error: error.message
+    });
+  }
+};
+
 module.exports = exports;

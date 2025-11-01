@@ -5,12 +5,20 @@ const Payment = require('../models/Payment');
 const Notification = require('../models/Notification');
 const Doctor = require('../models/Doctor'); // Added missing import
 const Hospital = require("../models/Hospital");
+const Transaction = require("../models/Transaction");
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const UpcomingEarnings = require("../models/UpcomingEarnings");
 const Wallet = require("../models/Wallet");
 const HealthRecord = require("../models/HealthRecords");
 const Otp = require("../models/Otp");
+const {
+  queueAppointmentCompletionNotification
+} = require('../services/appointmentCompletionNotificationService');
+const {
+  queuePrescriptionNotification
+} = require('../services/prescriptionNotificationService');
+
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
@@ -681,6 +689,60 @@ exports.getAppointment = async (req, res) => {
   }
 };
 
+
+exports.getAppointmentForPatient = async (req, res) => {
+  try {
+    let query = { _id: req.params.id };
+
+    if (req.user.role === 'patient') query.patient = req.user.id;
+    else if (req.user.role === 'doctor') query.doctor = req.user.doctorId;
+
+    const appointment = await Appointment.findOne(query)
+      .populate({
+        path: 'doctor',
+        select: 'user specializations qualifications experience languages bio clinicConsultationFee onlineConsultation address registrationNumber review meetingLink',
+        populate: { 
+          path: 'user', 
+          select: 'fullName profilePhoto email phoneNumber' 
+        }
+      })
+      .populate('patient', 'fullName profilePhoto email phoneNumber dateOfBirth gender bloodGroup')
+      .populate('payment', 'amount gstamount totalamount status paymentMethod gateway refund createdAt')
+      .populate('healthRecord', 'record_type file_urls description createdAt')
+      // Use separate select for inclusions and exclusions
+      .select('appointmentType date slot status reason videoConferenceLink prescription review cancellation rescheduledFrom createdAt updatedAt');
+
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    // Get transaction history
+    const transactions = appointment.payment ? await Transaction.find({
+      $or: [
+        { referenceId: appointment._id, referenceType: 'Appointment' },
+        { referenceId: appointment.payment._id, referenceType: 'Payment' }
+      ]
+    })
+    .populate('user', 'fullName profilePhoto')
+    .select('type amount status createdAt notes referenceId referenceType')
+    .sort({ createdAt: -1 }) : [];
+
+    res.status(200).json({ 
+      success: true, 
+      data: {
+        appointment,
+        transactions
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching appointment:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server Error' 
+    });
+  }
+};
+
 exports.updateAppointmentStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -766,7 +828,7 @@ exports.requestAppointmentCompletion = async (req, res) => {
       });
     }
 
-    if (appointment.status !== 'confirmed' && appointment.status !== 'pending') {
+    if (appointment.status !== 'confirmed' && appointment.status !== 'pending' && appointment.status !== 'rescheduled') {
       return res.status(400).json({
         success: false,
         message: `Appointment must be confirmed or pending to request completion. Current status: ${appointment.status}`
@@ -1036,23 +1098,30 @@ exports.verifyAppointmentCompletion = async (req, res) => {
     // Clear OTP after successful verification
     await Otp.findOneAndDelete({ user_id: patient._id });
 
-    // Create notifications
-    await Notification.create({
-      user: patient._id,
-      type: 'appointment_completed',
-      message: 'Your appointment has been marked as completed',
-      referenceId: appointment._id
-    });
+    // Send appointment completion notifications
+    try {
+      const appointmentData = {
+        appointmentId: appointment._id.toString(),
+        patientId: appointment.patient._id.toString(),
+        doctorId: appointment.doctor._id.toString(),
+        date: appointment.date,
+        type: appointment.appointmentType,
+        patientName: appointment.patient.fullName,
+        doctorName: appointment.doctor.fullName
+      };
 
-    // Notify doctor
-    const doctorUser = await User.findOne({ doctorId: decoded.doctorId });
-    if (doctorUser) {
-      await Notification.create({
-        user: doctorUser._id,
-        type: 'appointment_completed',
-        message: `Appointment with ${patient.fullName} has been completed`,
-        referenceId: appointment._id
-      });
+      const completionData = {
+        status: 'completed',
+        completedAt: new Date(),
+        otpVerified: true
+      };
+
+      // Queue appointment completion notification
+      await queueAppointmentCompletionNotification(appointmentData, completionData);
+
+    } catch (notificationError) {
+      console.warn('Appointment completion notification failed:', notificationError);
+      // Don't fail the main operation if notification fails
     }
 
     return res.status(200).json({
@@ -1120,7 +1189,7 @@ exports.resendAppointmentCompletionOTP = async (req, res) => {
       if (timeSinceCreation < minTimeBetweenOtps) {
         return res.status(429).json({
           success: false,
-          message: 'Please wait before requesting another OTP',
+          message: 'Please wait 1 minute before requesting another OTP',
           retryAfter: Math.ceil((minTimeBetweenOtps - timeSinceCreation) / 1000)
         });
       }
@@ -1207,7 +1276,6 @@ exports.addPrescription = async (req, res) => {
     const appointment = await Appointment.findOneAndUpdate(
       {
         _id: req.params.id,
-        // doctor: req.user.doctorId 
         doctor: doctorId
       },
       {
@@ -1215,24 +1283,53 @@ exports.addPrescription = async (req, res) => {
         status: 'completed'
       },
       { new: true }
-    );
+    ).populate('patient', 'fullName')
+      .populate('doctor', 'fullName');
 
     if (!appointment) {
       return res.status(404).json({ success: false, message: 'Appointment not found' });
     }
 
-    // Create notification
-    await Notification.create({
-      user: appointment.patient,
-      type: 'prescription_added',
-      message: 'Prescription added to your appointment',
-      referenceId: appointment._id
-    });
+    // Send prescription notification to patient
+    try {
+      const prescriptionData = {
+        diagnosis,
+        medicines: medicines || [],
+        tests: tests || [],
+        advice: advice || '',
+        followUpDate: followUpDate || null
+      };
 
-    res.status(200).json({ success: true, data: appointment });
+      const appointmentData = {
+        appointmentId: appointment._id.toString(),
+        patientId: appointment.patient._id.toString(),
+        doctorId: appointment.doctor._id.toString(),
+        patientName: appointment.patient.fullName,
+        doctorName: appointment.doctor.fullName,
+        appointmentType: appointment.appointmentType,
+        date: appointment.date
+      };
+
+      // Queue prescription notification (only to patient)
+      await queuePrescriptionNotification(prescriptionData, appointmentData);
+
+    } catch (notificationError) {
+      console.warn('Prescription notification failed:', notificationError);
+      // Don't fail the main operation if notification fails
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Prescription added successfully',
+      data: appointment
+    });
   } catch (err) {
     console.log(err.message)
-    res.status(500).json({ success: false, message: 'Server Error' });
+    res.status(500).json({
+      success: false,
+      message: 'Server Error',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 };
 
@@ -3904,7 +4001,7 @@ exports.getLastSixWeeksAppointmentsTrend = async (req, res) => {
 exports.getHealthRecords = async (req, res) => {
   try {
     const { appointmentId } = req.params;
-    
+
     // Validate appointmentId
     if (!appointmentId) {
       return res.status(400).json({ message: "Appointment ID is required" });
@@ -3915,24 +4012,24 @@ exports.getHealthRecords = async (req, res) => {
     }
 
     // Find health records by appointment_id with population
-    const healthRecords = await HealthRecord.find({ 
-      appointment_id: appointmentId 
+    const healthRecords = await HealthRecord.find({
+      appointment_id: appointmentId
     })
-    .populate({
-      path: 'user_id',
-      select: 'name email phone' // Select specific fields from User model
-    })
-    .populate({
-      path: 'appointment_id',
-      select: 'date time doctor_id' // Select specific fields from Appointment model
-    })
-    .sort({ createdAt: -1 });
+      .populate({
+        path: 'user_id',
+        select: 'name email phone' // Select specific fields from User model
+      })
+      .populate({
+        path: 'appointment_id',
+        select: 'date time doctor_id' // Select specific fields from Appointment model
+      })
+      .sort({ createdAt: -1 });
 
     // Return response (even if empty array)
     res.status(200).json({
       success: true,
-      message: healthRecords.length > 0 
-        ? "Health records retrieved successfully" 
+      message: healthRecords.length > 0
+        ? "Health records retrieved successfully"
         : "No health records found for this appointment",
       data: healthRecords,
       count: healthRecords.length
@@ -3940,15 +4037,15 @@ exports.getHealthRecords = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching health records:", error);
-    
+
     // More specific error handling
     if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        message: "Invalid appointment ID format" 
+      return res.status(400).json({
+        message: "Invalid appointment ID format"
       });
     }
-    
-    res.status(500).json({ 
+
+    res.status(500).json({
       success: false,
       message: "Internal server error while fetching health records",
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -4011,7 +4108,7 @@ exports.createHealthRecord = async (req, res) => {
 
   } catch (error) {
     console.error("Error creating health record:", error);
-    
+
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
@@ -4019,7 +4116,7 @@ exports.createHealthRecord = async (req, res) => {
         error: error.message
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: "Error creating health record",
@@ -4078,12 +4175,12 @@ exports.updateHealthRecord = async (req, res) => {
     const updatedRecord = await HealthRecord.findByIdAndUpdate(
       recordId,
       { $set: updateData },
-      { 
+      {
         new: true, // Return updated document
         runValidators: true // Run model validators
       }
     ).populate('user_id', 'name email')
-     .populate('appointment_id', 'date time doctor_id');
+      .populate('appointment_id', 'date time doctor_id');
 
     res.status(200).json({
       success: true,
@@ -4093,7 +4190,7 @@ exports.updateHealthRecord = async (req, res) => {
 
   } catch (error) {
     console.error("Error updating health record:", error);
-    
+
     if (error.name === 'ValidationError') {
       return res.status(400).json({
         success: false,
@@ -4101,7 +4198,7 @@ exports.updateHealthRecord = async (req, res) => {
         error: error.message
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: "Error updating health record",

@@ -6,9 +6,9 @@ const { protect, authorize } = require("../middleware/auth");
 
 // Doctor routes
 router.get(
-  "/doctor/withdrawals/:doctorId",
+  "/doctor/withdrawals",
   protect,
-  authorize(["doctor"]),
+  authorize("doctor"),
   withdrawalController.getDoctorWithdrawals
 );
 
